@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ANUBIS</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="cinematic-intro active" id="cinematicIntro">
+    <div class="intro-word" id="introWord">WELCOME</div>
+  </div>
+
+  <div class="app-shell hidden" id="appShell">
+    <button class="close-btn" id="closeBtn" aria-label="Close application">×</button>
+
+    <div class="background-layer">
+      <div class="space-gradient"></div>
+      <div class="grid-glow"></div>
+      <div class="particles" id="particles"></div>
+    </div>
+
+    <main class="main-stage">
+      <section class="intro-section" id="introSection">
+      </section>
+
+      <section class="orb-section" id="orbSection">
+        <div class="orb-wrapper state-idle" id="orbWrapper">
+          <div class="orb-halo halo-outer"></div>
+          <div class="orb-halo halo-mid"></div>
+          <div class="orb-core" id="orbCore">
+            <div class="orb-shine"></div>
+            <div class="orb-inner-glow"></div>
+          </div>
+        </div>
+
+        <div class="orb-status" id="orbStatus">IDLE</div>
+      </section>
+
+      <section class="subtitle-section" id="subtitleSection" aria-live="polite">
+        <div class="subtitle-box" id="subtitleBox">
+          <p class="subtitle-text" id="subtitleText">
+            System standby. Awaiting ANUBIS initialization.
+          </p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

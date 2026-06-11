@@ -1,0 +1,124 @@
+{
+  "scenarios": [
+    {
+      "id": "scenario-01",
+      "slug": "sql-injection",
+      "voiceName": "SQL Injection",
+      "displayName": "SQL Injection",
+      "shortCode": "SQLI",
+      "category": "Injection",
+      "severity": "Critical",
+      "description": "Tests unsafe database query handling and injection behavior.",
+      "defaultOwner": "Aya Magid",
+      "active": true
+    },
+    {
+      "id": "scenario-02",
+      "slug": "os-command-injection",
+      "voiceName": "OS Command Injection",
+      "displayName": "OS Command Injection",
+      "shortCode": "OSCI",
+      "category": "Injection",
+      "severity": "Critical",
+      "description": "Tests unsafe operating system command execution paths.",
+      "defaultOwner": "Alia",
+      "active": true
+    },
+    {
+      "id": "scenario-03",
+      "slug": "reflected-xss",
+      "voiceName": "Reflected XSS",
+      "displayName": "Reflected XSS",
+      "shortCode": "RXSS",
+      "category": "Cross-Site Scripting",
+      "severity": "High",
+      "description": "Tests immediate reflected script execution in user-controlled responses.",
+      "defaultOwner": "Farha Elsayed",
+      "active": true
+    },
+    {
+      "id": "scenario-04",
+      "slug": "stored-xss",
+      "voiceName": "Stored XSS",
+      "displayName": "Stored XSS",
+      "shortCode": "SXSS",
+      "category": "Cross-Site Scripting",
+      "severity": "Critical",
+      "description": "Tests persistent script injection stored by the application.",
+      "defaultOwner": "Mohamed Reda",
+      "active": true
+    },
+    {
+      "id": "scenario-05",
+      "slug": "information-disclosure",
+      "voiceName": "Information Disclosure",
+      "displayName": "Information Disclosure",
+      "shortCode": "INFO-DISC",
+      "category": "Exposure",
+      "severity": "High",
+      "description": "Tests exposure of sensitive data, metadata, credentials, or internal details.",
+      "defaultOwner": "Nouran Mohamed",
+      "active": true
+    },
+    {
+      "id": "scenario-06",
+      "slug": "xxe-injection",
+      "voiceName": "XXE Injection",
+      "displayName": "XXE Injection",
+      "shortCode": "XXE",
+      "category": "XML External Entities",
+      "severity": "High",
+      "description": "Tests unsafe XML parsing and external entity processing behavior.",
+      "defaultOwner": "Nourhan Mohamed",
+      "active": true
+    },
+    {
+      "id": "scenario-07",
+      "slug": "path-traversal",
+      "voiceName": "Path Traversal",
+      "displayName": "Path Traversal",
+      "shortCode": "PATH",
+      "category": "File Access",
+      "severity": "High",
+      "description": "Tests unauthorized file path access outside intended directories.",
+      "defaultOwner": "Ali Mohamed",
+      "active": true
+    },
+    {
+      "id": "scenario-08",
+      "slug": "access-control",
+      "voiceName": "Access Control",
+      "displayName": "Access Control",
+      "shortCode": "AC",
+      "category": "Authorization",
+      "severity": "Critical",
+      "description": "Tests broken authorization and invalid privilege boundaries.",
+      "defaultOwner": "Ziad Ashraf",
+      "active": true
+    },
+    {
+      "id": "scenario-09",
+      "slug": "http-request-smuggling",
+      "voiceName": "HTTP Request Smuggling",
+      "displayName": "HTTP Request Smuggling",
+      "shortCode": "HRS",
+      "category": "HTTP Desync",
+      "severity": "Critical",
+      "description": "Tests request parsing inconsistencies between front-end and back-end systems.",
+      "defaultOwner": "Ziad Ashish",
+      "active": true
+    },
+    {
+      "id": "scenario-10",
+      "slug": "websocket",
+      "voiceName": "WebSocket",
+      "displayName": "WebSocket Analysis",
+      "shortCode": "WS",
+      "category": "WebSocket Security",
+      "severity": "Medium",
+      "description": "Tests message flow, validation, and security behavior in WebSocket communication.",
+      "defaultOwner": "Ahmed Taher",
+      "active": true
+    }
+  ]
+}

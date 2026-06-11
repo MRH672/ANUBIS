@@ -1,0 +1,136 @@
+{
+  "members": [
+    {
+      "id": "member-1",
+      "fullName": "Hassan Hesham",
+      "displayPhrase": "Hassan Hesham one point one",
+      "phraseCode": "HASSAN1.1",
+      "normalizedPhrase": "hassan hesham one point one",
+      "number": "1.1",
+      "role": "coding",
+      "primaryScenario": "CODING",
+      "active": true
+    },
+    {
+      "id": "member-2",
+      "fullName": "Marcelino",
+      "displayPhrase": "Marcelino one point two",
+      "phraseCode": "MARCELINO1.2",
+      "normalizedPhrase": "marcelino one point two",
+      "number": "1.2",
+      "role": "coding",
+      "primaryScenario": "CODING",
+      "active": true
+    },
+    {
+      "id": "member-3",
+      "fullName": "Aya Magid",
+      "displayPhrase": "Aya Magid one point three",
+      "phraseCode": "AYA1.3",
+      "normalizedPhrase": "aya magid one point three",
+      "number": "1.3",
+      "role": "scenario-owner",
+      "primaryScenario": "SQL Injection",
+      "active": true
+    },
+    {
+      "id": "member-4",
+      "fullName": "Alia",
+      "displayPhrase": "Alia one point four",
+      "phraseCode": "ALIA1.4",
+      "normalizedPhrase": "alia one point four",
+      "number": "1.4",
+      "role": "scenario-owner",
+      "primaryScenario": "OS Command Injection",
+      "active": true
+    },
+    {
+      "id": "member-5",
+      "fullName": "Farha Elsayed",
+      "displayPhrase": "Farha Elsayed one point five",
+      "phraseCode": "FARHA1.5",
+      "normalizedPhrase": "farha elsayed one point five",
+      "number": "1.5",
+      "role": "scenario-owner",
+      "primaryScenario": "Reflected XSS",
+      "active": true
+    },
+    {
+      "id": "member-6",
+      "fullName": "Mohamed Reda",
+      "displayPhrase": "Mohamed Reda one point six",
+      "phraseCode": "MOHAMED1.6",
+      "normalizedPhrase": "mohamed reda one point six",
+      "number": "1.6",
+      "role": "scenario-owner",
+      "primaryScenario": "Stored XSS",
+      "active": true
+    },
+    {
+      "id": "member-7",
+      "fullName": "Nouran Mohamed",
+      "displayPhrase": "Nouran Mohamed one point seven",
+      "phraseCode": "NOURAN1.7",
+      "normalizedPhrase": "nouran mohamed one point seven",
+      "number": "1.7",
+      "role": "scenario-owner",
+      "primaryScenario": "Information Disclosure",
+      "active": true
+    },
+    {
+      "id": "member-8",
+      "fullName": "Nourhan Mohamed",
+      "displayPhrase": "Nourhan Mohamed one point eight",
+      "phraseCode": "NOURHAN1.8",
+      "normalizedPhrase": "nourhan mohamed one point eight",
+      "number": "1.8",
+      "role": "scenario-owner",
+      "primaryScenario": "XXE Injection",
+      "active": true
+    },
+    {
+      "id": "member-9",
+      "fullName": "Ali Mohamed",
+      "displayPhrase": "Ali Mohamed one point nine",
+      "phraseCode": "ALI1.9",
+      "normalizedPhrase": "ali mohamed one point nine",
+      "number": "1.9",
+      "role": "scenario-owner",
+      "primaryScenario": "Path Traversal",
+      "active": true
+    },
+    {
+      "id": "member-10",
+      "fullName": "Ziad Ashraf",
+      "displayPhrase": "Ziad Ashraf one point ten",
+      "phraseCode": "ZIADASHRAF1.10",
+      "normalizedPhrase": "ziad ashraf one point ten",
+      "number": "1.10",
+      "role": "scenario-owner",
+      "primaryScenario": "Access Control",
+      "active": true
+    },
+    {
+      "id": "member-11",
+      "fullName": "Ziad Ashish",
+      "displayPhrase": "Ziad Ashish one point eleven",
+      "phraseCode": "ZIADASHISH1.11",
+      "normalizedPhrase": "ziad ashish one point eleven",
+      "number": "1.11",
+      "role": "scenario-owner",
+      "primaryScenario": "HTTP Request Smuggling",
+      "active": true
+    },
+    {
+      "id": "member-12",
+      "fullName": "Ahmed Taher",
+      "displayPhrase": "Ahmed Taher one point twelve",
+      "phraseCode": "AHMED1.12",
+      "normalizedPhrase": "ahmed taher one point twelve",
+      "number": "1.12",
+      "role": "scenario-owner",
+      "primaryScenario": "WebSocket",
+      "active": true
+    }
+  ]
+}

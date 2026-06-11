@@ -1,0 +1,155 @@
+ANUBIS opens authentication
+ANUBIS:
+Operator authentication sequence initiated.
+Please identify yourself using your assigned voice phrase.
+
+If member speaks correctly
+MEMBER:
+[Assigned voice phrase]
+Example: Hassan Hesham one point one.
+
+ANUBIS:
+Identity pattern received.
+Verifying operator signature.
+
+ANUBIS:
+Authentication successful.
+Welcome, Hassan Hesham.
+State the required scenario.
+
+If member says scenario
+MEMBER:
+SQL Injection.
+or
+Stored XSS.
+or
+Access Control.
+
+ANUBIS:
+Scenario received.
+SQL Injection selected.
+Awaiting target designation.
+Please specify the target machine.
+
+If member says target
+MEMBER:
+Machine one.
+
+ANUBIS:
+Target received.
+Machine one selected.
+Preparing execution flow.
+
+ANUBIS:
+Please stand by.
+
+Full connected version
+دي نسخة كاملة متوصلة ببعضها كأنها session واحدة:
+
+ANUBIS:
+Operator authentication sequence initiated.
+Please identify yourself using your assigned voice phrase.
+
+MEMBER:
+Hassan Hesham one point one.
+
+ANUBIS:
+Identity pattern received.
+Verifying operator signature.
+
+ANUBIS:
+Authentication successful.
+Welcome, Hassan Hesham.
+State the required scenario.
+
+MEMBER:
+SQL Injection.
+
+ANUBIS:
+Scenario received.
+SQL Injection selected.
+Awaiting target designation.
+Please specify the target machine.
+
+MEMBER:
+Machine one.
+
+ANUBIS:
+Target received.
+Machine one selected.
+Preparing execution flow.
+Please stand by.
+=======================================
+حالات الخطأ
+لازم يكون عندك 3 ردود fallback ثابتة:
+
+لو phrase غير واضحة
+ANUBIS:
+Identity phrase not recognized.
+Please repeat your assigned voice phrase.
+
+لو السيناريو غير واضح
+ANUBIS:
+Scenario not recognized.
+Please state the scenario again.
+
+لو target غير واضح
+ANUBIS:
+Target designation not recognized.
+Please repeat the target machine
+================================
+ANUBIS:
+Operator authentication sequence initiated.
+Please identify yourself using your assigned voice phrase.
+
+MEMBER:
+[Assigned voice phrase]
+Example: Hassan Hesham one point one.
+
+ANUBIS:
+Identity pattern received.
+Verifying operator signature.
+
+ANUBIS:
+Authentication successful.
+Welcome, Hassan Hesham.
+State the required scenario.
+
+MEMBER:
+SQL Injection.
+or
+Stored XSS.
+or
+Access Control.
+
+ANUBIS:
+Scenario received.
+SQL Injection selected.
+Awaiting target designation.
+Please specify the target machine.
+
+MEMBER:
+Machine one.
+
+ANUBIS:
+Target received.
+Machine one selected.
+Preparing execution flow.
+Please stand by.
+
+fallback المعتمد
+If phrase is unclear
+ANUBIS:
+Identity phrase not recognized.
+Please repeat your assigned voice phrase.
+
+If scenario is unclear
+ANUBIS:
+Scenario not recognized.
+Please state the scenario again.
+
+If target is unclear
+ANUBIS:
+Target designation not recognized.
+Please repeat the target machine.
+

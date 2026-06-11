@@ -1,0 +1,70 @@
+{
+  "app": {
+    "name": "ANUBIS",
+    "productName": "ANUBIS",
+    "orbName": "DEFULT",
+    "version": "0.1.0",
+    "environment": "test"
+  },
+  "ui": {
+    "theme": "black-cyan",
+    "language": "en",
+    "subtitleEnabled": true,
+    "ambientEnabled": true,
+    "showCloseButton": true,
+    "defaultState": "idle"
+  },
+  "intro": {
+    "enabled": true,
+    "title": "WELCOME TO ANUBIS",
+    "longIntroMode": true,
+    "autoPlayOnLaunch": true,
+    "delayBeforeStartMs": 800
+  },
+  "voice": {
+    "mode": "hybrid",
+    "inputDevice": "laptop-microphone",
+    "outputDevice": "laptop-speakers",
+    "recognitionEnabled": false,
+    "ttsEnabled": false,
+    "retryLimit": 2,
+    "fuzzyRecognition": true,
+    "fallbackToManualInput": true
+  },
+  "authentication": {
+    "enabled": true,
+    "phraseRequired": true,
+    "welcomeMemberByName": true,
+    "allowScenarioSelectionAfterAuth": true
+  },
+  "scenarios": {
+    "selectionMode": "voice",
+    "allowAnyMemberToSelectAnyScenario": true,
+    "defaultThreatLevel": "HIGH",
+    "fakeSuccessScoreEnabled": true,
+    "defaultDurationSeconds": 180
+  },
+  "targets": {
+    "selectionMode": "voice",
+    "allowedMachines": ["Machine one", "Machine two", "Machine three"],
+    "defaultMachine": "Machine one"
+  },
+  "reports": {
+    "enabled": true,
+    "saveDirectory": "./Reports",
+    "showSavePathAfterGeneration": true,
+    "displayMode": "cinematic-summary-then-technical-details"
+  },
+  "testing": {
+    "demoFlowEnabled": true,
+    "keyboardShortcutsEnabled": true,
+    "manualStateSwitchingEnabled": true
+  },
+  "audio": {
+    "bootSfx": "./assets/audio/sfx/boot.mp3",
+    "thinkingSfx": "./assets/audio/sfx/thinking.mp3",
+    "confirmSfx": "./assets/audio/sfx/confirm.mp3",
+    "errorSfx": "./assets/audio/sfx/error.mp3",
+    "ambientLoop": "./assets/audio/ambience/ambient-loop.mp3"
+  }
+}
