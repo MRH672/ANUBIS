@@ -20,7 +20,7 @@ function createWindow() {
     }
   });
 
-  const filePath = path.join(__dirname, "renderer", "index.html");
+  const filePath = path.join(__dirname, "renderer", "dist", "index.html");
   console.log("Loading file:", filePath);
 
   mainWindow.loadFile(filePath);
@@ -51,6 +51,20 @@ app.whenReady().then(() => {
 ipcMain.on("window-close", () => {
   console.log("Received window-close event.");
   if (mainWindow) mainWindow.close();
+});
+
+ipcMain.on("window-minimize", () => {
+  if (mainWindow) mainWindow.minimize();
+});
+
+ipcMain.on("window-toggle-maximize", () => {
+  if (!mainWindow) return;
+
+  if (mainWindow.isMaximized()) {
+    mainWindow.unmaximize();
+  } else {
+    mainWindow.maximize();
+  }
 });
 
 app.on("window-all-closed", () => {
