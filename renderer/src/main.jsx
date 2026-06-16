@@ -560,12 +560,6 @@ function App() {
         await playDemoAuthenticationFlow();
       }
 
-      if (key === "i") {
-        event.preventDefault();
-        await playCinematicIntro();
-        await playIntroSequence();
-      }
-
       if (key === "t" && modeRef.current === "voice") {
         event.preventDefault();
         setOrbState("thinking");
