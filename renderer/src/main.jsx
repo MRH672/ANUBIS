@@ -326,19 +326,19 @@ function App() {
         await playIntroSequence();
       }
 
-      if (key === "t") {
+      if (key === "t" && modeRef.current === "voice") {
         event.preventDefault();
         setOrbState("thinking");
         setSubtitle("Manual thinking state activated.");
       }
 
-      if (key === "s") {
+      if (key === "s" && modeRef.current === "voice") {
         event.preventDefault();
         setOrbState("speaking");
         setSubtitle("Manual speaking state activated.");
       }
 
-      if (key === "d") {
+      if (key === "d" && modeRef.current === "voice") {
         event.preventDefault();
         setOrbState("idle");
         setSubtitle("Manual idle state activated.");
@@ -438,7 +438,6 @@ function AppShell({
           <ChatPage
             draft={chatDraft}
             messages={chatMessages}
-            orbState={orbState}
             subtitle={subtitle}
             onDraftChange={onChatDraftChange}
             onSubmit={onChatPromptSubmit}
@@ -461,7 +460,14 @@ function VoicePage({ orbState, subtitle }) {
   );
 }
 
-function ChatPage({ draft, messages, orbState, subtitle, onDraftChange, onSubmit }) {
+function ChatPage({ draft, messages, subtitle, onDraftChange, onSubmit }) {
+  const handlePromptKeyDown = (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      onSubmit(event);
+    }
+  };
+
   return (
     <div className="mx-auto grid h-full w-[min(920px,92vw)] grid-rows-[auto_1fr_auto] gap-5 pt-20">
       <header className="flex items-center justify-between border-b border-anubis-violet/15 pb-4">
@@ -469,7 +475,6 @@ function ChatPage({ draft, messages, orbState, subtitle, onDraftChange, onSubmit
           <div className="text-xs font-semibold uppercase tracking-[.28em] text-anubis-faint">ANUBIS CHAT</div>
           <div className="mt-2 text-lg font-semibold tracking-[.08em] text-anubis-text">Operator prompt console</div>
         </div>
-        <div className="text-right text-xs uppercase tracking-[.22em] text-anubis-muted">{orbState}</div>
       </header>
 
       <section className="min-h-0 overflow-y-auto rounded-lg border border-anubis-violet/15 bg-[#080512]/55 p-4 shadow-panel backdrop-blur">
@@ -502,9 +507,10 @@ function ChatPage({ draft, messages, orbState, subtitle, onDraftChange, onSubmit
             id="chatPrompt"
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
+            onKeyDown={handlePromptKeyDown}
             placeholder="Enter prompt or text..."
-            rows={3}
-            className="min-h-[82px] flex-1 resize-none rounded-md border border-white/10 bg-[#05030c]/80 px-4 py-3 text-sm leading-relaxed text-anubis-text outline-none transition placeholder:text-anubis-faint focus:border-anubis-bright/45 focus:ring-2 focus:ring-anubis-violet/20"
+            rows={2}
+            className="min-h-[52px] flex-1 resize-none rounded-md border border-white/10 bg-[#05030c]/80 px-4 py-2 text-sm leading-relaxed text-anubis-text outline-none transition placeholder:text-anubis-faint focus:border-anubis-bright/45 focus:ring-2 focus:ring-anubis-violet/20"
           />
           <button
             type="submit"
