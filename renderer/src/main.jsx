@@ -50,6 +50,14 @@ function App() {
   const [introWord, setIntroWord] = useState("WELCOME");
   const [introWordPhase, setIntroWordPhase] = useState("");
   const [interactionMode, setInteractionMode] = useState("voice");
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatMessages, setChatMessages] = useState([
+    {
+      id: 1,
+      role: "system",
+      text: "Chat mode ready. Enter operator prompt."
+    }
+  ]);
   const [orbState, setOrbState] = useState("idle");
   const [subtitle, setSubtitle] = useState("Boot sequence started.");
   const dataRef = useRef({ selectedScenario: null, selectedMachine: null });
@@ -83,6 +91,34 @@ function App() {
       setSubtitle(`${mode === "voice" ? "Voice" : "Chat"} mode active. Press SPACE to replay demo sequence.`);
     }
   }, []);
+
+  const submitChatPrompt = useCallback((event) => {
+    event.preventDefault();
+
+    const prompt = chatDraft.trim();
+    if (!prompt) return;
+
+    const nextId = Date.now();
+
+    setChatMessages((messages) => [
+      ...messages,
+      { id: nextId, role: "operator", text: prompt },
+      {
+        id: nextId + 1,
+        role: "system",
+        text: "Prompt received. ANUBIS ready to bind request to active scenario and target registry."
+      }
+    ]);
+    setChatDraft("");
+    setOrbState("thinking");
+    setSubtitle("Chat prompt received. Processing operator request.");
+
+    window.setTimeout(() => {
+      if (!sequenceRunningRef.current) {
+        setOrbState("idle");
+      }
+    }, 900);
+  }, [chatDraft]);
 
   const loadProjectData = useCallback(async () => {
     try {
@@ -275,9 +311,11 @@ function App() {
 
   useEffect(() => {
     const onKeyDown = async (event) => {
+      const targetTag = event.target?.tagName?.toLowerCase();
+      const isTextInput = targetTag === "input" || targetTag === "textarea";
       const key = event.key.toLowerCase();
 
-      if (event.code === "Space") {
+      if (event.code === "Space" && !isTextInput) {
         event.preventDefault();
         await playDemoAuthenticationFlow();
       }
@@ -323,7 +361,11 @@ function App() {
         hidden={appHidden}
         orbState={orbState}
         interactionMode={interactionMode}
+        chatDraft={chatDraft}
+        chatMessages={chatMessages}
         subtitle={subtitle}
+        onChatDraftChange={setChatDraft}
+        onChatPromptSubmit={submitChatPrompt}
         onChangeInteractionMode={changeInteractionMode}
         onClose={closeWindow}
         onMaximize={maximizeWindow}
@@ -356,9 +398,13 @@ function CinematicIntro({ active, fading, word, phase }) {
 
 function AppShell({
   hidden,
+  chatDraft,
+  chatMessages,
   interactionMode,
   orbState,
   subtitle,
+  onChatDraftChange,
+  onChatPromptSubmit,
   onChangeInteractionMode,
   onClose,
   onMaximize,
@@ -387,11 +433,88 @@ function AppShell({
 
       <BackgroundLayer />
 
-      <main className="relative z-[2] grid h-full w-full grid-rows-[1fr_auto_auto] place-items-center px-[4vw] pb-[5vh] pt-[4vh]">
-        <section className="mb-[2vh] flex min-h-[120px] items-center justify-center self-end" />
-        <Orb state={orbState} />
-        <Subtitle text={subtitle} />
+      <main className="relative z-[2] h-full w-full px-[4vw] pb-[5vh] pt-[4vh]">
+        {interactionMode === "chat" ? (
+          <ChatPage
+            draft={chatDraft}
+            messages={chatMessages}
+            orbState={orbState}
+            subtitle={subtitle}
+            onDraftChange={onChatDraftChange}
+            onSubmit={onChatPromptSubmit}
+          />
+        ) : (
+          <VoicePage orbState={orbState} subtitle={subtitle} />
+        )}
       </main>
+    </div>
+  );
+}
+
+function VoicePage({ orbState, subtitle }) {
+  return (
+    <div className="grid h-full w-full grid-rows-[1fr_auto_auto] place-items-center">
+      <section className="mb-[2vh] flex min-h-[120px] items-center justify-center self-end" />
+      <Orb state={orbState} />
+      <Subtitle text={subtitle} />
+    </div>
+  );
+}
+
+function ChatPage({ draft, messages, orbState, subtitle, onDraftChange, onSubmit }) {
+  return (
+    <div className="mx-auto grid h-full w-[min(920px,92vw)] grid-rows-[auto_1fr_auto] gap-5 pt-20">
+      <header className="flex items-center justify-between border-b border-anubis-violet/15 pb-4">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[.28em] text-anubis-faint">ANUBIS CHAT</div>
+          <div className="mt-2 text-lg font-semibold tracking-[.08em] text-anubis-text">Operator prompt console</div>
+        </div>
+        <div className="text-right text-xs uppercase tracking-[.22em] text-anubis-muted">{orbState}</div>
+      </header>
+
+      <section className="min-h-0 overflow-y-auto rounded-lg border border-anubis-violet/15 bg-[#080512]/55 p-4 shadow-panel backdrop-blur">
+        <div className="flex flex-col gap-3">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={[
+                "max-w-[82%] rounded-lg border px-4 py-3 text-sm leading-relaxed",
+                message.role === "operator"
+                  ? "ml-auto border-anubis-bright/25 bg-anubis-violet/15 text-anubis-text"
+                  : "border-white/10 bg-white/[.04] text-anubis-muted"
+              ].join(" ")}
+            >
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-[.2em] text-anubis-faint">
+                {message.role}
+              </div>
+              {message.text}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <form onSubmit={onSubmit} className="rounded-lg border border-anubis-violet/20 bg-[#100a1e]/60 p-3 shadow-panel backdrop-blur">
+        <label htmlFor="chatPrompt" className="sr-only">
+          Chat prompt
+        </label>
+        <div className="flex gap-3">
+          <textarea
+            id="chatPrompt"
+            value={draft}
+            onChange={(event) => onDraftChange(event.target.value)}
+            placeholder="Enter prompt or text..."
+            rows={3}
+            className="min-h-[82px] flex-1 resize-none rounded-md border border-white/10 bg-[#05030c]/80 px-4 py-3 text-sm leading-relaxed text-anubis-text outline-none transition placeholder:text-anubis-faint focus:border-anubis-bright/45 focus:ring-2 focus:ring-anubis-violet/20"
+          />
+          <button
+            type="submit"
+            className="min-w-[116px] rounded-md border border-anubis-bright/25 bg-anubis-violet/20 px-5 text-xs font-semibold uppercase tracking-[.2em] text-anubis-text transition hover:bg-anubis-violet/30 hover:text-white"
+          >
+            Send
+          </button>
+        </div>
+        <div className="mt-3 text-center text-xs tracking-[.12em] text-anubis-faint">{subtitle}</div>
+      </form>
     </div>
   );
 }
