@@ -748,6 +748,12 @@ function ChatPage({
   onHistoryNavigate,
   onSubmit
 }) {
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages]);
+
   const handlePromptKeyDown = (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -777,7 +783,7 @@ function ChatPage({
         <div className="text-right text-xs uppercase tracking-[.18em] text-anubis-muted">Rell WS: {wsStatus}</div>
       </header>
 
-      <section className="min-h-0 overflow-y-auto rounded-lg border border-anubis-violet/15 bg-[#080512]/55 p-4 shadow-panel backdrop-blur">
+      <section className="chat-scrollbar min-h-0 overflow-y-auto rounded-lg border border-anubis-violet/15 bg-[#080512]/55 p-4 shadow-panel backdrop-blur">
         <div className="flex flex-col gap-3">
           {messages.map((message) => (
             <div
@@ -795,6 +801,7 @@ function ChatPage({
               {message.text}
             </div>
           ))}
+          <div ref={messagesEndRef} />
         </div>
       </section>
 

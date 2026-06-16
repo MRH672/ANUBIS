@@ -73,3 +73,27 @@ select {
   mix-blend-mode: screen;
   animation: orbShimmer 7s linear infinite;
 }
+
+.chat-scrollbar {
+  scrollbar-color: rgba(196, 166, 255, 0.58) rgba(16, 10, 30, 0.42);
+  scrollbar-width: thin;
+}
+
+.chat-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.chat-scrollbar::-webkit-scrollbar-track {
+  background: rgba(16, 10, 30, 0.42);
+  border-radius: 999px;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(196, 166, 255, 0.7), rgba(155, 108, 255, 0.42));
+  border: 2px solid rgba(8, 5, 18, 0.85);
+  border-radius: 999px;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(222, 211, 255, 0.86), rgba(155, 108, 255, 0.58));
+}
