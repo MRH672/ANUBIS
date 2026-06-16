@@ -17,6 +17,31 @@ const dataPathCandidates = {
   scenarios: ["../../data/scenarios.json", "/data/scenarios.json", "../data/scenarios.json"]
 };
 
+const rellWebSocketUrl = "ws://127.0.0.1:8765";
+
+const moduleAliases = [
+  ["sql injection", "sqli"],
+  ["sqli", "sqli"],
+  ["sql", "sqli"],
+  ["cross site scripting", "xss"],
+  ["cross-site scripting", "xss"],
+  ["xss", "xss"],
+  ["command injection", "osci"],
+  ["os command", "osci"],
+  ["cmdi", "osci"],
+  ["osci", "osci"],
+  ["xxe", "xml"],
+  ["xml", "xml"],
+  ["path traversal", "path"],
+  ["traversal", "path"],
+  ["lfi", "path"],
+  ["access control", "access"],
+  ["authorization", "access"],
+  ["idor", "access"],
+  ["websocket", "websocket"],
+  ["socket", "websocket"]
+];
+
 function wait(ms) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
@@ -43,6 +68,40 @@ function pickFirstActive(items) {
   return items.find((item) => item.active) || null;
 }
 
+function getSpeechRecognition() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function interpretOperatorCommand(text) {
+  const lowered = text.toLowerCase();
+  const urlMatch = text.match(/https?:\/\/[^\s]+/);
+  const modules = [];
+
+  for (const [phrase, moduleName] of moduleAliases) {
+    if (lowered.includes(phrase) && !modules.includes(moduleName)) {
+      modules.push(moduleName);
+    }
+  }
+
+  return {
+    command: text,
+    target_url: urlMatch ? urlMatch[0] : null,
+    modules: modules.length ? modules : ["all"]
+  };
+}
+
+function formatServerEvent(payload) {
+  if (payload.event === "server.ready") return payload.message || "Rell bridge ready.";
+  if (payload.event === "run.started") {
+    const parsed = payload.parsed || {};
+    return `Run started: ${parsed.target_url || "no target"} [${(parsed.modules || ["all"]).join(", ")}]`;
+  }
+  if (payload.event === "run.progress") return `${payload.percent || 0}% - ${payload.stage}: ${payload.message}`;
+  if (payload.event === "run.completed") return "Run completed.";
+  if (payload.event === "error") return `Error: ${payload.message || "Unknown server error"}`;
+  return JSON.stringify(payload);
+}
+
 function App() {
   const [appHidden, setAppHidden] = useState(true);
   const [introActive, setIntroActive] = useState(true);
@@ -58,11 +117,16 @@ function App() {
       text: "Chat mode ready. Enter operator prompt."
     }
   ]);
+  const [wsStatus, setWsStatus] = useState("disconnected");
+  const [isListening, setIsListening] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState("");
   const [orbState, setOrbState] = useState("idle");
   const [subtitle, setSubtitle] = useState("Boot sequence started.");
   const dataRef = useRef({ selectedScenario: null, selectedMachine: null });
   const modeRef = useRef("voice");
+  const recognitionRef = useRef(null);
   const sequenceRunningRef = useRef(false);
+  const websocketRef = useRef(null);
 
   const closeWindow = useCallback(() => {
     if (window.electronAPI && typeof window.electronAPI.closeWindow === "function") {
@@ -92,33 +156,165 @@ function App() {
     }
   }, []);
 
+  const connectRellSocket = useCallback(() => {
+    const currentSocket = websocketRef.current;
+    if (currentSocket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(currentSocket.readyState)) {
+      return currentSocket;
+    }
+
+    setWsStatus("connecting");
+    const socket = new WebSocket(rellWebSocketUrl);
+    websocketRef.current = socket;
+
+    socket.addEventListener("open", () => {
+      setWsStatus("connected");
+      setSubtitle("Rell WebSocket connected.");
+    });
+
+    socket.addEventListener("message", (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        setChatMessages((messages) => [
+          ...messages,
+          { id: Date.now() + Math.random(), role: "server", text: formatServerEvent(payload) }
+        ]);
+
+        if (payload.event === "run.progress") {
+          setSubtitle(formatServerEvent(payload));
+        }
+
+        if (payload.event === "run.completed") {
+          setOrbState("idle");
+          setSubtitle("Rell run completed.");
+        }
+      } catch {
+        setChatMessages((messages) => [
+          ...messages,
+          { id: Date.now() + Math.random(), role: "server", text: String(event.data) }
+        ]);
+      }
+    });
+
+    socket.addEventListener("close", () => {
+      if (websocketRef.current === socket) {
+        websocketRef.current = null;
+      }
+      setWsStatus("disconnected");
+    });
+
+    socket.addEventListener("error", () => {
+      setWsStatus("error");
+      setSubtitle("Rell WebSocket unavailable.");
+    });
+
+    return socket;
+  }, []);
+
+  const sendOperatorCommand = useCallback((prompt, source = "chat") => {
+    const commandText = prompt.trim();
+    if (!commandText) return;
+
+    const interpreted = interpretOperatorCommand(commandText);
+    const messageId = Date.now();
+
+    setChatMessages((messages) => [
+      ...messages,
+      { id: messageId, role: "operator", text: commandText },
+      {
+        id: messageId + 1,
+        role: "system",
+        text: `Interpreted ${source} command: target=${interpreted.target_url || "missing"} modules=${interpreted.modules.join(", ")}`
+      }
+    ]);
+    setOrbState("thinking");
+    setSubtitle("Sending interpreted command to Rell.");
+
+    const socket = connectRellSocket();
+    const payload = JSON.stringify(interpreted);
+
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(payload);
+      return;
+    }
+
+    socket.addEventListener(
+      "open",
+      () => {
+        socket.send(payload);
+      },
+      { once: true }
+    );
+  }, [connectRellSocket]);
+
   const submitChatPrompt = useCallback((event) => {
     event.preventDefault();
 
     const prompt = chatDraft.trim();
     if (!prompt) return;
 
-    const nextId = Date.now();
-
-    setChatMessages((messages) => [
-      ...messages,
-      { id: nextId, role: "operator", text: prompt },
-      {
-        id: nextId + 1,
-        role: "system",
-        text: "Prompt received. ANUBIS ready to bind request to active scenario and target registry."
-      }
-    ]);
+    sendOperatorCommand(prompt, "chat");
     setChatDraft("");
-    setOrbState("thinking");
-    setSubtitle("Chat prompt received. Processing operator request.");
+  }, [chatDraft, sendOperatorCommand]);
 
-    window.setTimeout(() => {
+  const startVoiceCommand = useCallback(() => {
+    const SpeechRecognition = getSpeechRecognition();
+    if (!SpeechRecognition) {
+      setSubtitle("Speech recognition unavailable in this browser runtime.");
+      return;
+    }
+
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognitionRef.current = recognition;
+    setIsListening(true);
+    setVoiceTranscript("");
+    setOrbState("thinking");
+    setSubtitle("Listening for operator command.");
+
+    recognition.onresult = (event) => {
+      let transcript = "";
+      let finalTranscript = "";
+
+      for (const result of event.results) {
+        const text = result[0]?.transcript || "";
+        transcript += text;
+        if (result.isFinal) {
+          finalTranscript += text;
+        }
+      }
+
+      const cleanedTranscript = transcript.trim();
+      setVoiceTranscript(cleanedTranscript);
+
+      if (finalTranscript.trim()) {
+        sendOperatorCommand(finalTranscript.trim(), "voice");
+      }
+    };
+
+    recognition.onerror = () => {
+      setSubtitle("Voice interpreter failed.");
+      setIsListening(false);
+      setOrbState("idle");
+      recognitionRef.current = null;
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
       if (!sequenceRunningRef.current) {
         setOrbState("idle");
       }
-    }, 900);
-  }, [chatDraft]);
+    };
+
+    recognition.start();
+  }, [sendOperatorCommand]);
 
   const loadProjectData = useCallback(async () => {
     try {
@@ -310,6 +506,15 @@ function App() {
   }, [loadProjectData, playCinematicIntro, playIntroSequence]);
 
   useEffect(() => {
+    connectRellSocket();
+
+    return () => {
+      websocketRef.current?.close();
+      recognitionRef.current?.stop();
+    };
+  }, [connectRellSocket]);
+
+  useEffect(() => {
     const onKeyDown = async (event) => {
       const targetTag = event.target?.tagName?.toLowerCase();
       const isTextInput = targetTag === "input" || targetTag === "textarea";
@@ -364,12 +569,16 @@ function App() {
         chatDraft={chatDraft}
         chatMessages={chatMessages}
         subtitle={subtitle}
+        isListening={isListening}
+        voiceTranscript={voiceTranscript}
+        wsStatus={wsStatus}
         onChatDraftChange={setChatDraft}
         onChatPromptSubmit={submitChatPrompt}
         onChangeInteractionMode={changeInteractionMode}
         onClose={closeWindow}
         onMaximize={maximizeWindow}
         onMinimize={minimizeWindow}
+        onVoiceCommandStart={startVoiceCommand}
       />
     </>
   );
@@ -401,14 +610,18 @@ function AppShell({
   chatDraft,
   chatMessages,
   interactionMode,
+  isListening,
   orbState,
   subtitle,
+  voiceTranscript,
+  wsStatus,
   onChatDraftChange,
   onChatPromptSubmit,
   onChangeInteractionMode,
   onClose,
   onMaximize,
-  onMinimize
+  onMinimize,
+  onVoiceCommandStart
 }) {
   return (
     <div
@@ -439,28 +652,54 @@ function AppShell({
             draft={chatDraft}
             messages={chatMessages}
             subtitle={subtitle}
+            wsStatus={wsStatus}
             onDraftChange={onChatDraftChange}
             onSubmit={onChatPromptSubmit}
           />
         ) : (
-          <VoicePage orbState={orbState} subtitle={subtitle} />
+          <VoicePage
+            isListening={isListening}
+            orbState={orbState}
+            subtitle={subtitle}
+            transcript={voiceTranscript}
+            wsStatus={wsStatus}
+            onVoiceCommandStart={onVoiceCommandStart}
+          />
         )}
       </main>
     </div>
   );
 }
 
-function VoicePage({ orbState, subtitle }) {
+function VoicePage({ isListening, orbState, subtitle, transcript, wsStatus, onVoiceCommandStart }) {
   return (
     <div className="grid h-full w-full grid-rows-[1fr_auto_auto] place-items-center">
       <section className="mb-[2vh] flex min-h-[120px] items-center justify-center self-end" />
       <Orb state={orbState} />
+      <div className="mt-1 flex w-[min(640px,90vw)] flex-col items-center gap-3">
+        <button
+          type="button"
+          onClick={onVoiceCommandStart}
+          className={[
+            "h-10 rounded-full border px-5 text-xs font-semibold uppercase tracking-[.2em] transition",
+            isListening
+              ? "border-anubis-bright/40 bg-anubis-violet/25 text-white"
+              : "border-anubis-violet/20 bg-[#120a23]/40 text-anubis-muted hover:bg-anubis-violet/15 hover:text-anubis-bright"
+          ].join(" ")}
+        >
+          {isListening ? "Listening" : "Voice command"}
+        </button>
+        <div className="min-h-[22px] text-center text-xs tracking-[.12em] text-anubis-faint">
+          Rell WS: {wsStatus}
+          {transcript ? ` | ${transcript}` : ""}
+        </div>
+      </div>
       <Subtitle text={subtitle} />
     </div>
   );
 }
 
-function ChatPage({ draft, messages, subtitle, onDraftChange, onSubmit }) {
+function ChatPage({ draft, messages, subtitle, wsStatus, onDraftChange, onSubmit }) {
   const handlePromptKeyDown = (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -475,6 +714,7 @@ function ChatPage({ draft, messages, subtitle, onDraftChange, onSubmit }) {
           <div className="text-xs font-semibold uppercase tracking-[.28em] text-anubis-faint">ANUBIS CHAT</div>
           <div className="mt-2 text-lg font-semibold tracking-[.08em] text-anubis-text">Operator prompt console</div>
         </div>
+        <div className="text-right text-xs uppercase tracking-[.18em] text-anubis-muted">Rell WS: {wsStatus}</div>
       </header>
 
       <section className="min-h-0 overflow-y-auto rounded-lg border border-anubis-violet/15 bg-[#080512]/55 p-4 shadow-panel backdrop-blur">
