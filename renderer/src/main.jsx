@@ -49,9 +49,11 @@ function App() {
   const [introFading, setIntroFading] = useState(false);
   const [introWord, setIntroWord] = useState("WELCOME");
   const [introWordPhase, setIntroWordPhase] = useState("");
+  const [interactionMode, setInteractionMode] = useState("voice");
   const [orbState, setOrbState] = useState("idle");
   const [subtitle, setSubtitle] = useState("Boot sequence started.");
   const dataRef = useRef({ selectedScenario: null, selectedMachine: null });
+  const modeRef = useRef("voice");
   const sequenceRunningRef = useRef(false);
 
   const closeWindow = useCallback(() => {
@@ -69,6 +71,16 @@ function App() {
   const maximizeWindow = useCallback(() => {
     if (window.electronAPI && typeof window.electronAPI.maximizeWindow === "function") {
       window.electronAPI.maximizeWindow();
+    }
+  }, []);
+
+  const changeInteractionMode = useCallback((mode) => {
+    modeRef.current = mode;
+    setInteractionMode(mode);
+
+    if (!sequenceRunningRef.current) {
+      setOrbState("idle");
+      setSubtitle(`${mode === "voice" ? "Voice" : "Chat"} mode active. Press SPACE to replay demo sequence.`);
     }
   }, []);
 
@@ -168,7 +180,7 @@ function App() {
     }
 
     setOrbState("idle");
-    setSubtitle("System ready. Press SPACE to replay demo sequence.");
+    setSubtitle(`${modeRef.current === "voice" ? "Voice" : "Chat"} mode ready. Press SPACE to replay demo sequence.`);
     sequenceRunningRef.current = false;
   }, []);
 
@@ -181,15 +193,19 @@ function App() {
     await wait(2200);
 
     setOrbState("speaking");
-    setSubtitle("Please identify yourself using your assigned voice phrase.");
+    setSubtitle(
+      modeRef.current === "voice"
+        ? "Please identify yourself using your assigned voice phrase."
+        : "Please identify yourself using the chat authentication prompt."
+    );
     await wait(2400);
 
     setOrbState("thinking");
-    setSubtitle("Awaiting operator input.");
+    setSubtitle(`Awaiting operator ${modeRef.current === "voice" ? "voice" : "chat"} input.`);
     await wait(1800);
 
     setOrbState("speaking");
-    setSubtitle("Identity pattern received. Verifying operator signature.");
+    setSubtitle(`${modeRef.current === "voice" ? "Voice" : "Chat"} identity pattern received. Verifying operator signature.`);
     await wait(2400);
 
     setOrbState("speaking");
@@ -231,7 +247,7 @@ function App() {
     await wait(2400);
 
     setOrbState("idle");
-    setSubtitle("Demo complete. Awaiting operator authentication.");
+    setSubtitle(`Demo complete. Awaiting ${modeRef.current === "voice" ? "voice" : "chat"} authentication.`);
     sequenceRunningRef.current = false;
   }, []);
 
@@ -306,7 +322,9 @@ function App() {
       <AppShell
         hidden={appHidden}
         orbState={orbState}
+        interactionMode={interactionMode}
         subtitle={subtitle}
+        onChangeInteractionMode={changeInteractionMode}
         onClose={closeWindow}
         onMaximize={maximizeWindow}
         onMinimize={minimizeWindow}
@@ -336,7 +354,16 @@ function CinematicIntro({ active, fading, word, phase }) {
   );
 }
 
-function AppShell({ hidden, orbState, subtitle, onClose, onMaximize, onMinimize }) {
+function AppShell({
+  hidden,
+  interactionMode,
+  orbState,
+  subtitle,
+  onChangeInteractionMode,
+  onClose,
+  onMaximize,
+  onMinimize
+}) {
   return (
     <div
       className={[
@@ -356,6 +383,8 @@ function AppShell({ hidden, orbState, subtitle, onClose, onMaximize, onMinimize 
         </WindowControlButton>
       </div>
 
+      <ModeToggle mode={interactionMode} onChange={onChangeInteractionMode} />
+
       <BackgroundLayer />
 
       <main className="relative z-[2] grid h-full w-full grid-rows-[1fr_auto_auto] place-items-center px-[4vw] pb-[5vh] pt-[4vh]">
@@ -363,6 +392,33 @@ function AppShell({ hidden, orbState, subtitle, onClose, onMaximize, onMinimize 
         <Orb state={orbState} />
         <Subtitle text={subtitle} />
       </main>
+    </div>
+  );
+}
+
+function ModeToggle({ mode, onChange }) {
+  return (
+    <div className="absolute left-7 top-[22px] z-[9999] flex rounded-full border border-anubis-violet/20 bg-[#120a23]/30 p-1 backdrop-blur">
+      {["voice", "chat"].map((item) => {
+        const active = mode === item;
+
+        return (
+          <button
+            key={item}
+            type="button"
+            onClick={() => onChange(item)}
+            aria-pressed={active}
+            className={[
+              "h-9 min-w-[82px] rounded-full px-4 text-xs font-semibold uppercase tracking-[.18em] transition",
+              active
+                ? "bg-anubis-violet/25 text-anubis-text shadow-[0_0_18px_rgba(155,108,255,.16)]"
+                : "text-anubis-faint hover:bg-anubis-violet/10 hover:text-anubis-bright"
+            ].join(" ")}
+          >
+            {item}
+          </button>
+        );
+      })}
     </div>
   );
 }
