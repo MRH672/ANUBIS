@@ -72,9 +72,27 @@ function getSpeechRecognition() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
 
+function normalizeTarget(rawTarget) {
+  if (!rawTarget) return null;
+  const trimmed = rawTarget.replace(/[),.;!?]+$/, "");
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `http://${trimmed}`;
+}
+
+function extractTarget(text) {
+  const urlMatch = text.match(/https?:\/\/[^\s]+/i);
+  if (urlMatch) return normalizeTarget(urlMatch[0]);
+
+  const targetMatch = text.match(
+    /\b((?:localhost|(?:\d{1,3}\.){3}\d{1,3}|(?:[a-z0-9-]+\.)+[a-z]{2,})(?::\d{1,5})?(?:\/[^\s]*)?)/i
+  );
+
+  return targetMatch ? normalizeTarget(targetMatch[1]) : null;
+}
+
 function interpretOperatorCommand(text) {
   const lowered = text.toLowerCase();
-  const urlMatch = text.match(/https?:\/\/[^\s]+/);
+  const targetUrl = extractTarget(text);
   const modules = [];
 
   for (const [phrase, moduleName] of moduleAliases) {
@@ -85,7 +103,7 @@ function interpretOperatorCommand(text) {
 
   return {
     command: text,
-    target_url: urlMatch ? urlMatch[0] : null,
+    target_url: targetUrl,
     modules: modules.length ? modules : ["all"]
   };
 }
@@ -110,6 +128,8 @@ function App() {
   const [introWordPhase, setIntroWordPhase] = useState("");
   const [interactionMode, setInteractionMode] = useState("voice");
   const [chatDraft, setChatDraft] = useState("");
+  const [commandHistory, setCommandHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
   const [chatMessages, setChatMessages] = useState([
     {
       id: 1,
@@ -253,8 +273,23 @@ function App() {
     if (!prompt) return;
 
     sendOperatorCommand(prompt, "chat");
+    setCommandHistory((history) => [prompt, ...history.filter((item) => item !== prompt)].slice(0, 30));
+    setHistoryIndex(-1);
     setChatDraft("");
   }, [chatDraft, sendOperatorCommand]);
+
+  const navigateCommandHistory = useCallback((direction) => {
+    if (!commandHistory.length) return;
+
+    setHistoryIndex((currentIndex) => {
+      const nextIndex =
+        direction === "up"
+          ? Math.min(currentIndex + 1, commandHistory.length - 1)
+          : Math.max(currentIndex - 1, -1);
+      setChatDraft(nextIndex === -1 ? "" : commandHistory[nextIndex]);
+      return nextIndex;
+    });
+  }, [commandHistory]);
 
   const startVoiceCommand = useCallback(() => {
     const SpeechRecognition = getSpeechRecognition();
@@ -568,11 +603,14 @@ function App() {
         interactionMode={interactionMode}
         chatDraft={chatDraft}
         chatMessages={chatMessages}
+        commandHistory={commandHistory}
+        historyIndex={historyIndex}
         subtitle={subtitle}
         isListening={isListening}
         voiceTranscript={voiceTranscript}
         wsStatus={wsStatus}
         onChatDraftChange={setChatDraft}
+        onCommandHistoryNavigate={navigateCommandHistory}
         onChatPromptSubmit={submitChatPrompt}
         onChangeInteractionMode={changeInteractionMode}
         onClose={closeWindow}
@@ -609,6 +647,8 @@ function AppShell({
   hidden,
   chatDraft,
   chatMessages,
+  commandHistory,
+  historyIndex,
   interactionMode,
   isListening,
   orbState,
@@ -616,6 +656,7 @@ function AppShell({
   voiceTranscript,
   wsStatus,
   onChatDraftChange,
+  onCommandHistoryNavigate,
   onChatPromptSubmit,
   onChangeInteractionMode,
   onClose,
@@ -651,9 +692,12 @@ function AppShell({
           <ChatPage
             draft={chatDraft}
             messages={chatMessages}
+            commandHistory={commandHistory}
+            historyIndex={historyIndex}
             subtitle={subtitle}
             wsStatus={wsStatus}
             onDraftChange={onChatDraftChange}
+            onHistoryNavigate={onCommandHistoryNavigate}
             onSubmit={onChatPromptSubmit}
           />
         ) : (
@@ -699,11 +743,33 @@ function VoicePage({ isListening, orbState, subtitle, transcript, wsStatus, onVo
   );
 }
 
-function ChatPage({ draft, messages, subtitle, wsStatus, onDraftChange, onSubmit }) {
+function ChatPage({
+  commandHistory,
+  draft,
+  historyIndex,
+  messages,
+  subtitle,
+  wsStatus,
+  onDraftChange,
+  onHistoryNavigate,
+  onSubmit
+}) {
   const handlePromptKeyDown = (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       onSubmit(event);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      onHistoryNavigate("up");
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      onHistoryNavigate("down");
     }
   };
 
@@ -759,7 +825,14 @@ function ChatPage({ draft, messages, subtitle, wsStatus, onDraftChange, onSubmit
             Send
           </button>
         </div>
-        <div className="mt-3 text-center text-xs tracking-[.12em] text-anubis-faint">{subtitle}</div>
+        <div className="mt-3 flex items-center justify-between gap-3 text-xs tracking-[.12em] text-anubis-faint">
+          <span>{subtitle}</span>
+          <span>
+            {commandHistory.length
+              ? `History ${historyIndex >= 0 ? historyIndex + 1 : 0}/${commandHistory.length}`
+              : "History empty"}
+          </span>
+        </div>
       </form>
     </div>
   );
