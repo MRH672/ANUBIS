@@ -18,6 +18,7 @@ const dataPathCandidates = {
 };
 
 const rellWebSocketUrl = "ws://127.0.0.1:8765";
+const demoEnabled = false;
 
 const moduleAliases = [
   ["sql injection", "sqli"],
@@ -172,7 +173,7 @@ function App() {
 
     if (!sequenceRunningRef.current) {
       setOrbState("idle");
-      setSubtitle(`${mode === "voice" ? "Voice" : "Chat"} mode active. Press SPACE to replay demo sequence.`);
+      setSubtitle(`${mode === "voice" ? "Voice" : "Chat"} mode active. Demo sequence disabled.`);
     }
   }, []);
 
@@ -447,7 +448,7 @@ function App() {
     }
 
     setOrbState("idle");
-    setSubtitle(`${modeRef.current === "voice" ? "Voice" : "Chat"} mode ready. Press SPACE to replay demo sequence.`);
+    setSubtitle(`${modeRef.current === "voice" ? "Voice" : "Chat"} mode ready. Demo sequence disabled.`);
     sequenceRunningRef.current = false;
   }, []);
 
@@ -530,7 +531,12 @@ function App() {
       if (!mounted) return;
       await wait(300);
       if (!mounted) return;
-      await playIntroSequence();
+      if (demoEnabled) {
+        await playIntroSequence();
+      } else {
+        setOrbState("idle");
+        setSubtitle(`${modeRef.current === "voice" ? "Voice" : "Chat"} mode ready. Demo sequence disabled.`);
+      }
     }
 
     boot();
@@ -555,7 +561,7 @@ function App() {
       const isTextInput = targetTag === "input" || targetTag === "textarea";
       const key = event.key.toLowerCase();
 
-      if (event.code === "Space" && !isTextInput) {
+      if (demoEnabled && event.code === "Space" && !isTextInput) {
         event.preventDefault();
         await playDemoAuthenticationFlow();
       }
