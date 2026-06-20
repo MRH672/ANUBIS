@@ -1406,7 +1406,7 @@ function VoicePage({
                 <Volume2 className="h-4 w-4" aria-hidden="true" />
               )}
             </button>
-            <div className="pointer-events-none absolute bottom-12 left-1/2 flex h-40 w-12 -translate-x-1/2 flex-col items-center justify-center rounded-full border border-anubis-violet/20 bg-[#080512]/95 py-4 opacity-0 shadow-panel backdrop-blur transition group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
+            <div className="pointer-events-none absolute bottom-12 left-1/2 flex h-40 w-12 -translate-x-1/2 flex-col items-center justify-center rounded-full border border-anubis-violet/20 bg-[#080512]/95 py-4 opacity-0 shadow-panel backdrop-blur transition delay-500 duration-200 group-hover:pointer-events-auto group-hover:opacity-100 group-hover:delay-0 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-focus-within:delay-0">
               <input
                 type="range"
                 min="0"
