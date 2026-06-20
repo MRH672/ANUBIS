@@ -503,6 +503,7 @@ function App() {
     setOrbState("thinking");
     setSubtitle(`Target: ${targetUrl}. Modules: ${moduleLabel}.`);
     if (source === "voice") {
+      setVoiceTranscript(`Accepted command. Target: ${targetUrl}. Modules: ${moduleLabel}.`);
       speakVoiceStep(`Accepted command. Target ${targetUrl}. Modules ${moduleLabel}.`);
     }
 
@@ -523,6 +524,7 @@ function App() {
       ]);
       setSubtitle(step);
       if (source === "voice") {
+        setVoiceTranscript(step);
         speakVoiceStep(step);
       }
       await wait(randomDelay(scanDelayRange.min, scanDelayRange.max));
@@ -540,6 +542,7 @@ function App() {
     setInteractionMode("reports");
     setSubtitle(`Report ready for ${targetUrl}.`);
     if (source === "voice") {
+      setVoiceTranscript(`Report ready for ${targetUrl}.`);
       speakVoiceStep(`Report ready for ${targetUrl}.`);
     }
     setChatMessages((messages) => [
