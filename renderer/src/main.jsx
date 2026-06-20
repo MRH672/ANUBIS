@@ -170,6 +170,7 @@ function App() {
   const micStreamRef = useRef(null);
   const recognitionRef = useRef(null);
   const sequenceRunningRef = useRef(false);
+  const voiceTimeoutRef = useRef(null);
   const websocketRef = useRef(null);
 
   const closeWindow = useCallback(() => {
@@ -344,6 +345,11 @@ function App() {
   }, [commandHistory]);
 
   const stopVoiceInput = useCallback((stopRecognition = true) => {
+    if (voiceTimeoutRef.current) {
+      clearTimeout(voiceTimeoutRef.current);
+      voiceTimeoutRef.current = null;
+    }
+
     if (analyserFrameRef.current) {
       cancelAnimationFrame(analyserFrameRef.current);
       analyserFrameRef.current = null;
@@ -360,6 +366,21 @@ function App() {
     setIsListening(false);
     setVoiceLevel(0);
   }, []);
+
+  const armVoiceTimeout = useCallback(() => {
+    if (voiceTimeoutRef.current) {
+      clearTimeout(voiceTimeoutRef.current);
+    }
+
+    voiceTimeoutRef.current = window.setTimeout(() => {
+      const message = "No voice command detected. Stopped listening.";
+      setVoiceError(message);
+      setSubtitle(message);
+      window.electronAPI?.stopNativeVoice?.();
+      stopVoiceInput(false);
+      setOrbState("idle");
+    }, 10000);
+  }, [stopVoiceInput]);
 
   const changeSelectedMic = useCallback((deviceId) => {
     stopVoiceInput();
@@ -417,6 +438,7 @@ function App() {
     setVoiceTranscript("");
     setOrbState("thinking");
     setSubtitle("Listening for operator command.");
+    armVoiceTimeout();
 
     if (hasNativeVoice()) {
       setSubtitle("Listening with Windows speech recognizer.");
@@ -455,9 +477,14 @@ function App() {
       setVoiceTranscript(cleanedTranscript);
       if (cleanedTranscript) {
         setSubtitle(`Heard: ${cleanedTranscript}`);
+        armVoiceTimeout();
       }
 
       if (finalTranscript.trim()) {
+        if (voiceTimeoutRef.current) {
+          clearTimeout(voiceTimeoutRef.current);
+          voiceTimeoutRef.current = null;
+        }
         setSubtitle(`Understood: ${finalTranscript.trim()}`);
         sendOperatorCommand(finalTranscript.trim(), "voice");
       }
@@ -484,7 +511,7 @@ function App() {
     };
 
     recognition.start();
-  }, [isListening, selectedMicId, sendOperatorCommand, startAudioMeter, stopVoiceInput]);
+  }, [armVoiceTimeout, isListening, selectedMicId, sendOperatorCommand, startAudioMeter, stopVoiceInput]);
 
   const loadProjectData = useCallback(async () => {
     try {
@@ -699,6 +726,7 @@ function App() {
         setVoiceTranscript(text);
         if (text.trim()) {
           setSubtitle(`Hearing: ${text.trim()}`);
+          armVoiceTimeout();
         }
         return;
       }
@@ -707,9 +735,15 @@ function App() {
         const text = payload.text || "";
         setVoiceTranscript(text);
         if (text.trim()) {
+          if (voiceTimeoutRef.current) {
+            clearTimeout(voiceTimeoutRef.current);
+            voiceTimeoutRef.current = null;
+          }
           setSubtitle(`Understood: ${text.trim()}`);
           sendOperatorCommand(text.trim(), "voice");
         }
+        window.electronAPI?.stopNativeVoice?.();
+        stopVoiceInput(false);
         return;
       }
 
@@ -717,6 +751,7 @@ function App() {
         setIsListening(true);
         setVoiceError("");
         setSubtitle("Windows speech recognizer listening.");
+        armVoiceTimeout();
         return;
       }
 
@@ -741,7 +776,7 @@ function App() {
         }
       }
     });
-  }, [sendOperatorCommand, stopVoiceInput]);
+  }, [armVoiceTimeout, sendOperatorCommand, stopVoiceInput]);
 
   useEffect(() => {
     const onKeyDown = async (event) => {
