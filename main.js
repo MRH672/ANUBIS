@@ -1,8 +1,72 @@
 const { app, BrowserWindow, ipcMain, session } = require("electron");
+const { spawn } = require("child_process");
 const path = require("path");
 
 let mainWindow;
+let nativeVoiceProcess = null;
+let nativeVoiceStdout = "";
 const isDebug = process.env.ANUBIS_DEBUG === "1";
+
+function sendNativeVoiceEvent(payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("native-voice-event", payload);
+  }
+}
+
+function stopNativeVoice() {
+  if (!nativeVoiceProcess) return;
+  nativeVoiceProcess.kill();
+  nativeVoiceProcess = null;
+  sendNativeVoiceEvent({ type: "stopped" });
+}
+
+function startNativeVoice() {
+  if (process.platform !== "win32") {
+    sendNativeVoiceEvent({ type: "error", message: "Native voice is only available on Windows." });
+    return;
+  }
+
+  if (nativeVoiceProcess) {
+    sendNativeVoiceEvent({ type: "listening" });
+    return;
+  }
+
+  const scriptPath = path.join(__dirname, "scripts", "windows-stt.ps1");
+  nativeVoiceStdout = "";
+  nativeVoiceProcess = spawn("powershell.exe", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    scriptPath
+  ]);
+
+  sendNativeVoiceEvent({ type: "starting" });
+
+  nativeVoiceProcess.stdout.on("data", (chunk) => {
+    nativeVoiceStdout += chunk.toString();
+    const lines = nativeVoiceStdout.split(/\r?\n/);
+    nativeVoiceStdout = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        sendNativeVoiceEvent(JSON.parse(line));
+      } catch {
+        sendNativeVoiceEvent({ type: "log", message: line });
+      }
+    }
+  });
+
+  nativeVoiceProcess.stderr.on("data", (chunk) => {
+    sendNativeVoiceEvent({ type: "error", message: chunk.toString().trim() });
+  });
+
+  nativeVoiceProcess.on("exit", (code) => {
+    nativeVoiceProcess = null;
+    sendNativeVoiceEvent({ type: "stopped", code });
+  });
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -97,6 +161,15 @@ ipcMain.on("window-toggle-maximize", () => {
   }
 });
 
+ipcMain.on("native-voice-start", () => {
+  startNativeVoice();
+});
+
+ipcMain.on("native-voice-stop", () => {
+  stopNativeVoice();
+});
+
 app.on("window-all-closed", () => {
+  stopNativeVoice();
   if (process.platform !== "darwin") app.quit();
 });

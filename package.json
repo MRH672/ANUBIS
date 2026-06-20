@@ -35,6 +35,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "scripts/**/*",
       "renderer/**/*",
       "!renderer/src/**/*",
       "!renderer/vite.config.*",

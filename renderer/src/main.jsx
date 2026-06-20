@@ -73,6 +73,10 @@ function getSpeechRecognition() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
 
+function hasNativeVoice() {
+  return window.electronAPI?.platform === "win32" && typeof window.electronAPI.startNativeVoice === "function";
+}
+
 function normalizeTarget(rawTarget) {
   if (!rawTarget) return null;
   const trimmed = rawTarget.replace(/[),.;!?]+$/, "");
@@ -387,14 +391,11 @@ function App() {
   }, []);
 
   const startVoiceCommand = useCallback(async () => {
-    const SpeechRecognition = getSpeechRecognition();
-    if (!SpeechRecognition) {
-      setSubtitle("Speech recognition unavailable in this browser runtime.");
-      return;
-    }
-
-    if (recognitionRef.current) {
+    if (isListening || recognitionRef.current) {
       stopVoiceInput();
+      if (hasNativeVoice()) {
+        window.electronAPI.stopNativeVoice();
+      }
       return;
     }
 
@@ -421,6 +422,21 @@ function App() {
     setVoiceTranscript("");
     setOrbState("thinking");
     setSubtitle("Listening for operator command.");
+
+    if (hasNativeVoice()) {
+      setSubtitle("Listening with Windows speech recognizer.");
+      window.electronAPI.startNativeVoice();
+      return;
+    }
+
+    const SpeechRecognition = getSpeechRecognition();
+    if (!SpeechRecognition) {
+      const message = "Speech recognition unavailable in this browser runtime.";
+      setVoiceError(message);
+      setSubtitle(message);
+      stopVoiceInput();
+      return;
+    }
 
     recognition.onresult = (event) => {
       let transcript = "";
@@ -463,7 +479,7 @@ function App() {
     };
 
     recognition.start();
-  }, [selectedMicId, sendOperatorCommand, startAudioMeter, stopVoiceInput]);
+  }, [isListening, selectedMicId, sendOperatorCommand, startAudioMeter, stopVoiceInput]);
 
   const loadProjectData = useCallback(async () => {
     try {
@@ -664,9 +680,58 @@ function App() {
 
     return () => {
       websocketRef.current?.close();
+      window.electronAPI?.stopNativeVoice?.();
       stopVoiceInput();
     };
   }, [connectRellSocket, stopVoiceInput]);
+
+  useEffect(() => {
+    if (typeof window.electronAPI?.onNativeVoiceEvent !== "function") return undefined;
+
+    return window.electronAPI.onNativeVoiceEvent((payload) => {
+      if (payload.type === "partial") {
+        setVoiceTranscript(payload.text || "");
+        return;
+      }
+
+      if (payload.type === "result") {
+        const text = payload.text || "";
+        setVoiceTranscript(text);
+        if (text.trim()) {
+          sendOperatorCommand(text.trim(), "voice");
+        }
+        return;
+      }
+
+      if (payload.type === "listening" || payload.type === "starting") {
+        setIsListening(true);
+        setVoiceError("");
+        setSubtitle("Windows speech recognizer listening.");
+        return;
+      }
+
+      if (payload.type === "error") {
+        const message = `Native voice failed: ${payload.message || "unknown error"}.`;
+        console.error(message, payload);
+        setVoiceError(message);
+        setSubtitle(message);
+        setChatMessages((messages) => [
+          ...messages,
+          { id: Date.now() + Math.random(), role: "system", text: message }
+        ]);
+        stopVoiceInput(false);
+        setOrbState("idle");
+        return;
+      }
+
+      if (payload.type === "stopped") {
+        stopVoiceInput(false);
+        if (!sequenceRunningRef.current) {
+          setOrbState("idle");
+        }
+      }
+    });
+  }, [sendOperatorCommand, stopVoiceInput]);
 
   useEffect(() => {
     const onKeyDown = async (event) => {
