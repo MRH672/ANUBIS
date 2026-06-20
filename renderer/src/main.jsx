@@ -57,6 +57,22 @@ function wait(ms) {
   });
 }
 
+function clampDelay(value, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(30000, Math.max(500, Math.round(number)));
+}
+
+function randomDelay(min, max) {
+  const low = Math.min(min, max);
+  const high = Math.max(min, max);
+  return Math.floor(Math.random() * (high - low + 1)) + low;
+}
+
+function getModuleLabel(moduleId) {
+  return scanModuleOptions.find((module) => module.id === moduleId)?.label || moduleId.toUpperCase();
+}
+
 async function loadJsonFile(paths) {
   let lastError;
 
@@ -226,6 +242,20 @@ function App() {
     const saved = window.localStorage.getItem("anubis:selectedScanModules");
     return saved ? JSON.parse(saved) : ["xss"];
   });
+  const [scanDelayRange, setScanDelayRange] = useState(() => {
+    const saved = window.localStorage.getItem("anubis:scanDelayRange");
+    if (!saved) return { min: 1800, max: 5200 };
+
+    try {
+      const parsed = JSON.parse(saved);
+      return {
+        min: clampDelay(parsed.min, 1800),
+        max: clampDelay(parsed.max, 5200)
+      };
+    } catch {
+      return { min: 1800, max: 5200 };
+    }
+  });
   const [subtitle, setSubtitle] = useState("Boot sequence started.");
   const dataRef = useRef({ selectedScenario: null, selectedMachine: null });
   const modeRef = useRef("voice");
@@ -304,7 +334,18 @@ function App() {
     });
   }, []);
 
-  const sendOperatorCommand = useCallback((prompt, source = "chat") => {
+  const changeScanDelayRange = useCallback((field, value) => {
+    setScanDelayRange((range) => {
+      const nextRange = {
+        ...range,
+        [field]: clampDelay(value, field === "min" ? 1800 : 5200)
+      };
+      window.localStorage.setItem("anubis:scanDelayRange", JSON.stringify(nextRange));
+      return nextRange;
+    });
+  }, []);
+
+  const sendOperatorCommand = useCallback(async (prompt, source = "chat") => {
     const commandText = prompt.trim();
     if (!commandText) return;
 
@@ -312,7 +353,9 @@ function App() {
     const targetUrl = scanTarget;
     const modules = selectedScanModules.length ? selectedScanModules : interpreted.modules;
     const messageId = Date.now();
-    const moduleLabel = modules.join(", ");
+    const moduleLabels = modules.map(getModuleLabel);
+    const moduleLabel = moduleLabels.join(", ");
+    const stepIdBase = messageId + 100;
 
     setChatMessages((messages) => [
       ...messages,
@@ -320,7 +363,8 @@ function App() {
       {
         id: messageId + 1,
         role: "system",
-        text: `Accepted ${source} command. Target: ${targetUrl}. Modules: ${moduleLabel}.`
+        text: `Accepted ${source} command. Target: ${targetUrl}. Modules: ${moduleLabel}.`,
+        active: true
       }
     ]);
     setOrbState("thinking");
@@ -329,25 +373,30 @@ function App() {
     const steps = [
       `Preparing scan workspace for ${targetUrl}.`,
       `Loading modules: ${moduleLabel}.`,
-      `Crawling target application routes.`,
-      `Running selected module checks.`,
-      `Validating collected evidence.`,
-      `Preparing operator summary.`
+      `Crawling target application routes for ${targetUrl}.`,
+      ...moduleLabels.map((label) => `Test ${label} on ${targetUrl}.`),
+      `Validating collected evidence for ${targetUrl}.`,
+      `Preparing operator summary for ${targetUrl}.`
     ];
 
-    steps.forEach((step, index) => {
-      window.setTimeout(() => {
-        setChatMessages((messages) => [
-          ...messages,
-          { id: Date.now() + Math.random(), role: "system", text: step }
-        ]);
-        setSubtitle(step);
-        if (index === steps.length - 1) {
-          setOrbState("idle");
-        }
-      }, (index + 1) * 900);
-    });
-  }, [selectedScanModules]);
+    for (const [index, step] of steps.entries()) {
+      const activeId = stepIdBase + index;
+      setChatMessages((messages) => [
+        ...messages,
+        { id: activeId, role: "system", text: step, active: true }
+      ]);
+      setSubtitle(step);
+      await wait(randomDelay(scanDelayRange.min, scanDelayRange.max));
+      setChatMessages((messages) =>
+        messages.map((message) => (message.id === activeId ? { ...message, active: false } : message))
+      );
+    }
+
+    setChatMessages((messages) =>
+      messages.map((message) => (message.id === messageId + 1 ? { ...message, active: false } : message))
+    );
+    setOrbState("idle");
+  }, [scanDelayRange.max, scanDelayRange.min, selectedScanModules]);
 
   const submitChatPrompt = useCallback((event) => {
     event.preventDefault();
@@ -672,7 +721,7 @@ function App() {
     }
 
     setOrbState("idle");
-    setSubtitle(`${modeRef.current === "voice" ? "Voice" : "Chat"} mode ready. Demo sequence disabled.`);
+    setSubtitle(`${modeRef.current === "voice" ? "Voice" : "Chat"} mode ready. Execution sequence idle.`);
     sequenceRunningRef.current = false;
   }, []);
 
@@ -739,7 +788,7 @@ function App() {
     await wait(2400);
 
     setOrbState("idle");
-    setSubtitle(`Demo complete. Awaiting ${modeRef.current === "voice" ? "voice" : "chat"} authentication.`);
+    setSubtitle(`Sequence complete. Awaiting ${modeRef.current === "voice" ? "voice" : "chat"} authentication.`);
     sequenceRunningRef.current = false;
   }, []);
 
@@ -877,6 +926,7 @@ function App() {
         orbState={orbState}
         selectedMicId={selectedMicId}
         selectedScanModules={selectedScanModules}
+        scanDelayRange={scanDelayRange}
         interactionMode={interactionMode}
         chatDraft={chatDraft}
         chatMessages={chatMessages}
@@ -894,6 +944,7 @@ function App() {
         onMicChange={changeSelectedMic}
         onMicRefresh={refreshAudioInputDevices}
         onModuleToggle={toggleScanModule}
+        onScanDelayRangeChange={changeScanDelayRange}
         onClose={closeWindow}
         onMaximize={maximizeWindow}
         onMinimize={minimizeWindow}
@@ -936,6 +987,7 @@ function AppShell({
   orbState,
   selectedMicId,
   selectedScanModules,
+  scanDelayRange,
   subtitle,
   voiceTranscript,
   voiceLevel,
@@ -947,6 +999,7 @@ function AppShell({
   onMicChange,
   onMicRefresh,
   onModuleToggle,
+  onScanDelayRangeChange,
   onClose,
   onMaximize,
   onMinimize,
@@ -981,10 +1034,12 @@ function AppShell({
             audioInputDevices={audioInputDevices}
             selectedMicId={selectedMicId}
             selectedScanModules={selectedScanModules}
+            scanDelayRange={scanDelayRange}
             subtitle={subtitle}
             onMicChange={onMicChange}
             onMicRefresh={onMicRefresh}
             onModuleToggle={onModuleToggle}
+            onScanDelayRangeChange={onScanDelayRangeChange}
           />
         ) : interactionMode === "chat" ? (
           <ChatPage
@@ -1017,10 +1072,12 @@ function SettingsPage({
   audioInputDevices,
   selectedMicId,
   selectedScanModules,
+  scanDelayRange,
   subtitle,
   onMicChange,
   onMicRefresh,
-  onModuleToggle
+  onModuleToggle,
+  onScanDelayRangeChange
 }) {
   useEffect(() => {
     onMicRefresh();
@@ -1085,6 +1142,36 @@ function SettingsPage({
               </button>
             );
           })}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-anubis-violet/15 bg-[#080512]/55 p-5 shadow-panel backdrop-blur">
+        <div className="mb-3 text-xs font-semibold uppercase tracking-[.2em] text-anubis-faint">Step delay</div>
+        <div className="grid grid-cols-2 gap-3">
+          <label className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[.14em] text-anubis-faint">
+            Min ms
+            <input
+              type="number"
+              min="500"
+              max="30000"
+              step="100"
+              value={scanDelayRange.min}
+              onChange={(event) => onScanDelayRangeChange("min", event.target.value)}
+              className="h-11 rounded-md border border-white/10 bg-[#05030c]/90 px-3 text-sm text-anubis-text outline-none focus:border-anubis-bright/45 focus:ring-2 focus:ring-anubis-violet/20"
+            />
+          </label>
+          <label className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[.14em] text-anubis-faint">
+            Max ms
+            <input
+              type="number"
+              min="500"
+              max="30000"
+              step="100"
+              value={scanDelayRange.max}
+              onChange={(event) => onScanDelayRangeChange("max", event.target.value)}
+              className="h-11 rounded-md border border-white/10 bg-[#05030c]/90 px-3 text-sm text-anubis-text outline-none focus:border-anubis-bright/45 focus:ring-2 focus:ring-anubis-violet/20"
+            />
+          </label>
         </div>
       </section>
     </div>
@@ -1185,8 +1272,9 @@ function ChatPage({
                   : "border-white/10 bg-white/[.04] text-anubis-muted"
               ].join(" ")}
             >
-              <div className="mb-1 text-[10px] font-semibold uppercase tracking-[.2em] text-anubis-faint">
-                {message.role}
+              <div className="mb-1 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em] text-anubis-faint">
+                {message.active ? <span className="scan-spinner" aria-hidden="true" /> : null}
+                <span>{message.role}</span>
               </div>
               {message.text}
             </div>

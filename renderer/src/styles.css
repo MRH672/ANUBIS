@@ -97,3 +97,19 @@ select {
 .chat-scrollbar::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(180deg, rgba(222, 211, 255, 0.86), rgba(155, 108, 255, 0.58));
 }
+
+.scan-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(246, 241, 255, 0.18);
+  border-top-color: rgba(196, 166, 255, 0.95);
+  border-radius: 999px;
+  animation: scanSpinner 850ms linear infinite;
+}
+
+@keyframes scanSpinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
