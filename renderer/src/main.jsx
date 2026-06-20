@@ -74,7 +74,75 @@ function getSpeechRecognition() {
 }
 
 function hasNativeVoice() {
-  return window.electronAPI?.platform === "win32" && typeof window.electronAPI.startNativeVoice === "function";
+  return window.electronAPI?.platform === "win32" && typeof window.electronAPI.transcribeNativeVoice === "function";
+}
+
+function encodeWav(samples, sampleRate) {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
+
+  const writeString = (offset, value) => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index));
+    }
+  };
+
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+
+  let offset = 44;
+  for (const sample of samples) {
+    const clamped = Math.max(-1, Math.min(1, sample));
+    view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+    offset += 2;
+  }
+
+  return buffer;
+}
+
+function recordWavFromStream(stream, durationMs = 6000) {
+  return new Promise((resolve, reject) => {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) {
+      reject(new Error("AudioContext unavailable."));
+      return;
+    }
+
+    const audioContext = new AudioContext();
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    const silentGain = audioContext.createGain();
+    const samples = [];
+
+    silentGain.gain.value = 0;
+    processor.onaudioprocess = (event) => {
+      samples.push(...event.inputBuffer.getChannelData(0));
+    };
+
+    source.connect(processor);
+    processor.connect(silentGain);
+    silentGain.connect(audioContext.destination);
+
+    window.setTimeout(async () => {
+      processor.disconnect();
+      source.disconnect();
+      silentGain.disconnect();
+      const sampleRate = audioContext.sampleRate;
+      await audioContext.close();
+      resolve(encodeWav(Float32Array.from(samples), sampleRate));
+    }, durationMs);
+  });
 }
 
 function normalizeTarget(rawTarget) {
@@ -161,7 +229,7 @@ function App() {
   const [voiceError, setVoiceError] = useState("");
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [orbState, setOrbState] = useState("idle");
-  const [selectedMicId, setSelectedMicId] = useState("");
+  const [selectedMicId, setSelectedMicId] = useState(() => window.localStorage.getItem("anubis:selectedMicId") || "");
   const [subtitle, setSubtitle] = useState("Boot sequence started.");
   const dataRef = useRef({ selectedScenario: null, selectedMachine: null });
   const modeRef = useRef("voice");
@@ -224,6 +292,7 @@ function App() {
 
     if (inputs.length && !inputs.some((device) => device.deviceId === selectedMicId)) {
       setSelectedMicId(inputs[0].deviceId);
+      window.localStorage.setItem("anubis:selectedMicId", inputs[0].deviceId);
     }
 
     setSubtitle(inputs.length ? "Microphone devices refreshed." : "No microphone input devices found.");
@@ -385,6 +454,7 @@ function App() {
   const changeSelectedMic = useCallback((deviceId) => {
     stopVoiceInput();
     setSelectedMicId(deviceId);
+    window.localStorage.setItem("anubis:selectedMicId", deviceId);
     setSubtitle("Microphone input changed.");
   }, [stopVoiceInput]);
 
@@ -441,8 +511,40 @@ function App() {
     armVoiceTimeout();
 
     if (hasNativeVoice()) {
-      setSubtitle("Listening with Windows speech recognizer.");
-      window.electronAPI.startNativeVoice();
+      setSubtitle("Recording selected microphone for 6 seconds.");
+      try {
+        const wavBuffer = await recordWavFromStream(stream, 6000);
+        if (voiceTimeoutRef.current) {
+          clearTimeout(voiceTimeoutRef.current);
+          voiceTimeoutRef.current = null;
+        }
+        setSubtitle("Transcribing selected microphone recording.");
+        const result = await window.electronAPI.transcribeNativeVoice(wavBuffer);
+        const transcriptPayload = result.payloads?.find((payload) => payload.type === "result");
+        const errorPayload = result.payloads?.find((payload) => payload.type === "error");
+
+        if (transcriptPayload?.text) {
+          const text = transcriptPayload.text.trim();
+          setVoiceTranscript(text);
+          setSubtitle(`Understood: ${text}`);
+          sendOperatorCommand(text, "voice");
+        } else {
+          const message = `Native voice failed: ${errorPayload?.message || result.stderr || "no speech captured from selected microphone"}.`;
+          setVoiceError(message);
+          setSubtitle(message);
+          setChatMessages((messages) => [
+            ...messages,
+            { id: Date.now() + Math.random(), role: "system", text: message }
+          ]);
+        }
+      } catch (error) {
+        const message = `Native voice failed: ${error.message || "selected microphone recording failed"}.`;
+        setVoiceError(message);
+        setSubtitle(message);
+      } finally {
+        stopVoiceInput(false);
+        setOrbState("idle");
+      }
       return;
     }
 

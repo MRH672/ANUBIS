@@ -1,5 +1,10 @@
+param(
+  [string]$WaveFile = ""
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$recognizer = $null
 
 function Write-JsonLine {
   param([hashtable]$Payload)
@@ -12,6 +17,23 @@ try {
   $culture = [System.Globalization.CultureInfo]::GetCultureInfo("en-US")
   $recognizer = New-Object System.Speech.Recognition.SpeechRecognitionEngine($culture)
   $recognizer.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))
+
+  if ($WaveFile -ne "") {
+    $recognizer.SetInputToWaveFile($WaveFile)
+    $result = $recognizer.Recognize()
+    if ($null -ne $result -and $result.Text.Trim().Length -gt 0) {
+      Write-JsonLine @{
+        type = "result"
+        text = $result.Text
+        confidence = [Math]::Round($result.Confidence, 3)
+      }
+    } else {
+      Write-JsonLine @{ type = "error"; message = "No speech recognized from selected microphone recording." }
+      exit 2
+    }
+    exit 0
+  }
+
   $recognizer.SetInputToDefaultAudioDevice()
 
   Register-ObjectEvent -InputObject $recognizer -EventName SpeechRecognized -Action {

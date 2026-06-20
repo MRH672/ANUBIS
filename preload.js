@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   closeWindow: () => ipcRenderer.send("window-close"),
   startNativeVoice: () => ipcRenderer.send("native-voice-start"),
   stopNativeVoice: () => ipcRenderer.send("native-voice-stop"),
+  transcribeNativeVoice: (audioBuffer) => ipcRenderer.invoke("native-voice-transcribe-wav", audioBuffer),
   onNativeVoiceEvent: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("native-voice-event", listener);

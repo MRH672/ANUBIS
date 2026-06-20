@@ -1,5 +1,7 @@
 const { app, BrowserWindow, ipcMain, session } = require("electron");
 const { spawn } = require("child_process");
+const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 let mainWindow;
@@ -65,6 +67,42 @@ function startNativeVoice() {
   nativeVoiceProcess.on("exit", (code) => {
     nativeVoiceProcess = null;
     sendNativeVoiceEvent({ type: "stopped", code });
+  });
+}
+
+function runPowerShellStt(args) {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(__dirname, "scripts", "windows-stt.ps1");
+    let stdout = "";
+    let stderr = "";
+    const child = spawn("powershell.exe", [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      scriptPath,
+      ...args
+    ]);
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("exit", (code) => {
+      const lines = stdout.split(/\r?\n/).filter((line) => line.trim());
+      const payloads = lines.map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return { type: "log", message: line };
+        }
+      });
+      resolve({ code, stderr: stderr.trim(), payloads });
+    });
   });
 }
 
@@ -167,6 +205,22 @@ ipcMain.on("native-voice-start", () => {
 
 ipcMain.on("native-voice-stop", () => {
   stopNativeVoice();
+});
+
+ipcMain.handle("native-voice-transcribe-wav", async (_event, audioBuffer) => {
+  if (process.platform !== "win32") {
+    return { ok: false, error: "Native WAV transcription is only available on Windows." };
+  }
+
+  const tempPath = path.join(os.tmpdir(), `anubis-voice-${Date.now()}.wav`);
+  fs.writeFileSync(tempPath, Buffer.from(new Uint8Array(audioBuffer)));
+
+  try {
+    const result = await runPowerShellStt(["-WaveFile", tempPath]);
+    return { ok: result.code === 0, ...result };
+  } finally {
+    fs.rm(tempPath, { force: true }, () => {});
+  }
 });
 
 app.on("window-all-closed", () => {
