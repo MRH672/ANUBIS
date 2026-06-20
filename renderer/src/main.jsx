@@ -121,6 +121,18 @@ function formatServerEvent(payload) {
   return JSON.stringify(payload);
 }
 
+function formatVoiceError(errorName, detail = "") {
+  const reasons = {
+    "not-allowed": "microphone permission blocked",
+    "service-not-allowed": "speech service blocked by runtime",
+    "no-speech": "no speech detected",
+    "audio-capture": "no microphone audio captured",
+    network: "speech service network/backend unavailable",
+    aborted: "speech recognition aborted"
+  };
+  return `Voice interpreter failed: ${reasons[errorName] || errorName || "unknown error"}${detail ? ` (${detail})` : ""}.`;
+}
+
 function App() {
   const [appHidden, setAppHidden] = useState(true);
   const [introActive, setIntroActive] = useState(true);
@@ -142,6 +154,7 @@ function App() {
   const [wsStatus, setWsStatus] = useState("disconnected");
   const [isListening, setIsListening] = useState(false);
   const [voiceLevel, setVoiceLevel] = useState(0);
+  const [voiceError, setVoiceError] = useState("");
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [orbState, setOrbState] = useState("idle");
   const [selectedMicId, setSelectedMicId] = useState("");
@@ -192,8 +205,11 @@ function App() {
     try {
       const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       permissionStream.getTracks().forEach((track) => track.stop());
-    } catch {
-      setSubtitle("Microphone permission denied or unavailable.");
+    } catch (error) {
+      const message = formatVoiceError(error.name || "microphone", error.message);
+      console.error(message, error);
+      setVoiceError(message);
+      setSubtitle(message);
       return;
     }
 
@@ -401,6 +417,7 @@ function App() {
     recognition.continuous = false;
     recognitionRef.current = recognition;
     setIsListening(true);
+    setVoiceError("");
     setVoiceTranscript("");
     setOrbState("thinking");
     setSubtitle("Listening for operator command.");
@@ -425,8 +442,15 @@ function App() {
       }
     };
 
-    recognition.onerror = () => {
-      setSubtitle("Voice interpreter failed.");
+    recognition.onerror = (event) => {
+      const message = formatVoiceError(event.error, event.message);
+      console.error(message, event);
+      setVoiceError(message);
+      setSubtitle(message);
+      setChatMessages((messages) => [
+        ...messages,
+        { id: Date.now() + Math.random(), role: "system", text: message }
+      ]);
       setOrbState("idle");
       stopVoiceInput();
     };
@@ -699,6 +723,7 @@ function App() {
         subtitle={subtitle}
         isListening={isListening}
         voiceLevel={voiceLevel}
+        voiceError={voiceError}
         voiceTranscript={voiceTranscript}
         wsStatus={wsStatus}
         onChatDraftChange={setChatDraft}
@@ -751,6 +776,7 @@ function AppShell({
   subtitle,
   voiceTranscript,
   voiceLevel,
+  voiceError,
   wsStatus,
   onChatDraftChange,
   onCommandHistoryNavigate,
@@ -814,6 +840,7 @@ function AppShell({
             subtitle={subtitle}
             transcript={voiceTranscript}
             voiceLevel={voiceLevel}
+            voiceError={voiceError}
             wsStatus={wsStatus}
             onVoiceCommandStart={onVoiceCommandStart}
           />
@@ -867,7 +894,7 @@ function SettingsPage({ audioInputDevices, selectedMicId, subtitle, onMicChange,
   );
 }
 
-function VoicePage({ isListening, orbState, subtitle, transcript, voiceLevel, wsStatus, onVoiceCommandStart }) {
+function VoicePage({ isListening, orbState, subtitle, transcript, voiceLevel, voiceError, wsStatus, onVoiceCommandStart }) {
   return (
     <div className="grid h-full w-full grid-rows-[1fr_auto_auto] place-items-center">
       <section className="mb-[2vh] flex min-h-[120px] items-center justify-center self-end" />
@@ -889,6 +916,11 @@ function VoicePage({ isListening, orbState, subtitle, transcript, voiceLevel, ws
           Rell WS: {wsStatus}
           {transcript ? ` | ${transcript}` : ""}
         </div>
+        {voiceError ? (
+          <div className="max-w-full rounded-md border border-red-300/20 bg-red-500/10 px-3 py-2 text-center text-xs leading-relaxed text-red-100">
+            {voiceError}
+          </div>
+        ) : null}
         <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
           <div
             className="h-full rounded-full bg-anubis-bright transition-[width]"
