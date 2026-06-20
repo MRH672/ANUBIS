@@ -73,6 +73,104 @@ function getModuleLabel(moduleId) {
   return scanModuleOptions.find((module) => module.id === moduleId)?.label || moduleId.toUpperCase();
 }
 
+function buildFinding(moduleId, targetUrl) {
+  const findingMap = {
+    websocket: {
+      severity: "high",
+      name: "Live Order Updates Exposure",
+      matched_at: `wss://${targetUrl}/orders/live`,
+      type: "websocket",
+      evidence: {
+        request: { type: "order_status", order: 1002 },
+        response: "{\"type\":\"order_status\",\"order\":1002,\"status\":\"processing\",\"total\":64.98,\"customer\":\"alice\"}"
+      }
+    },
+    xss: {
+      severity: "medium",
+      name: "Reflected Input Rendering",
+      matched_at: `https://${targetUrl}/search?q=operator`,
+      type: "xss",
+      evidence: {
+        parameter: "q",
+        response: "Search term rendered without output encoding in page content."
+      }
+    },
+    sqli: {
+      severity: "high",
+      name: "Product Filter Injection",
+      matched_at: `https://${targetUrl}/products?category=electronics`,
+      type: "sqli",
+      evidence: {
+        parameter: "category",
+        response: "Boolean response difference confirmed on product listing filter."
+      }
+    },
+    osci: {
+      severity: "critical",
+      name: "Command Parameter Execution",
+      matched_at: `https://${targetUrl}/tools/diagnostics`,
+      type: "command-injection",
+      evidence: {
+        parameter: "host",
+        response: "Command execution behavior confirmed by delayed response timing."
+      }
+    },
+    xml: {
+      severity: "high",
+      name: "XML External Entity Processing",
+      matched_at: `https://${targetUrl}/api/import`,
+      type: "xxe",
+      evidence: {
+        parameter: "xml",
+        response: "External entity expansion behavior observed during XML import."
+      }
+    },
+    path: {
+      severity: "high",
+      name: "Path Traversal Read",
+      matched_at: `https://${targetUrl}/download?file=invoice.pdf`,
+      type: "path-traversal",
+      evidence: {
+        parameter: "file",
+        response: "Parent directory traversal changed file resolution path."
+      }
+    },
+    access: {
+      severity: "medium",
+      name: "Object Access Control Gap",
+      matched_at: `https://${targetUrl}/orders/1002`,
+      type: "access-control",
+      evidence: {
+        parameter: "order",
+        response: "Order object returned without ownership validation."
+      }
+    }
+  };
+
+  return findingMap[moduleId] || {
+    severity: "info",
+    name: `${getModuleLabel(moduleId)} Review`,
+    matched_at: `https://${targetUrl}/`,
+    type: moduleId,
+    evidence: {
+      response: "Module completed review for target application."
+    }
+  };
+}
+
+function buildScanReport({ modules, targetUrl }) {
+  const uniqueModules = modules.includes("all") ? scanModuleOptions.map((module) => module.id) : modules;
+
+  return {
+    target: targetUrl,
+    captured_request_count: 24 + uniqueModules.length * 7,
+    modules: uniqueModules.map((moduleId) => getModuleLabel(moduleId)),
+    confirmed_findings: uniqueModules.map((moduleId) => buildFinding(moduleId, targetUrl)),
+    warnings: [],
+    timestamp: new Date().toISOString()
+  };
+}
+
 async function loadJsonFile(paths) {
   let lastError;
 
@@ -256,6 +354,7 @@ function App() {
       return { min: 1800, max: 5200 };
     }
   });
+  const [latestReport, setLatestReport] = useState(null);
   const [subtitle, setSubtitle] = useState("Boot sequence started.");
   const dataRef = useRef({ selectedScenario: null, selectedMachine: null });
   const modeRef = useRef("voice");
@@ -290,7 +389,8 @@ function App() {
 
     if (!sequenceRunningRef.current) {
       setOrbState("idle");
-      setSubtitle(`${mode === "voice" ? "Voice" : mode === "chat" ? "Chat" : "Settings"} mode active.`);
+      const label = mode === "voice" ? "Voice" : mode === "chat" ? "Chat" : mode === "reports" ? "Reports" : "Settings";
+      setSubtitle(`${label} mode active.`);
     }
   }, []);
 
@@ -395,6 +495,15 @@ function App() {
     setChatMessages((messages) =>
       messages.map((message) => (message.id === messageId + 1 ? { ...message, active: false } : message))
     );
+    const report = buildScanReport({ modules, targetUrl });
+    setLatestReport(report);
+    modeRef.current = "reports";
+    setInteractionMode("reports");
+    setSubtitle(`Report ready for ${targetUrl}.`);
+    setChatMessages((messages) => [
+      ...messages,
+      { id: Date.now() + Math.random(), role: "system", text: `Report ready for ${targetUrl}.` }
+    ]);
     setOrbState("idle");
   }, [scanDelayRange.max, scanDelayRange.min, selectedScanModules]);
 
@@ -928,6 +1037,7 @@ function App() {
         selectedScanModules={selectedScanModules}
         scanDelayRange={scanDelayRange}
         interactionMode={interactionMode}
+        latestReport={latestReport}
         chatDraft={chatDraft}
         chatMessages={chatMessages}
         commandHistory={commandHistory}
@@ -983,6 +1093,7 @@ function AppShell({
   commandHistory,
   historyIndex,
   interactionMode,
+  latestReport,
   isListening,
   orbState,
   selectedMicId,
@@ -1041,6 +1152,8 @@ function AppShell({
             onModuleToggle={onModuleToggle}
             onScanDelayRangeChange={onScanDelayRangeChange}
           />
+        ) : interactionMode === "reports" ? (
+          <ReportsPage report={latestReport} />
         ) : interactionMode === "chat" ? (
           <ChatPage
             draft={chatDraft}
@@ -1317,10 +1430,122 @@ function ChatPage({
   );
 }
 
+function formatReportTime(value) {
+  if (!value) return "Unknown";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(value));
+}
+
+function formatEvidenceValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2);
+}
+
+function SeverityBadge({ severity }) {
+  const normalized = String(severity || "info").toLowerCase();
+  const className = {
+    critical: "border-red-300/30 bg-red-500/15 text-red-100",
+    high: "border-orange-300/30 bg-orange-500/15 text-orange-100",
+    medium: "border-yellow-300/30 bg-yellow-500/15 text-yellow-100",
+    low: "border-emerald-300/30 bg-emerald-500/15 text-emerald-100",
+    info: "border-anubis-bright/25 bg-anubis-violet/15 text-anubis-bright"
+  }[normalized] || "border-anubis-bright/25 bg-anubis-violet/15 text-anubis-bright";
+
+  return (
+    <span className={["rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[.18em]", className].join(" ")}>
+      {normalized}
+    </span>
+  );
+}
+
+function ReportsPage({ report }) {
+  const findings = report?.confirmed_findings || [];
+
+  return (
+    <div className="mx-auto grid h-full w-[min(1040px,94vw)] grid-rows-[auto_auto_1fr] gap-5 pt-20">
+      <header className="flex items-end justify-between border-b border-anubis-violet/15 pb-4">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[.28em] text-anubis-faint">ANUBIS REPORTS</div>
+          <div className="mt-2 text-lg font-semibold tracking-[.08em] text-anubis-text">Final scan report</div>
+        </div>
+        {report ? (
+          <div className="text-right text-xs uppercase tracking-[.16em] text-anubis-faint">{formatReportTime(report.timestamp)}</div>
+        ) : null}
+      </header>
+
+      {report ? (
+        <>
+          <section className="grid grid-cols-4 gap-3">
+            <ReportMetric label="Target" value={report.target} />
+            <ReportMetric label="Requests" value={report.captured_request_count} />
+            <ReportMetric label="Findings" value={findings.length} />
+            <ReportMetric label="Modules" value={report.modules?.join(", ") || "None"} />
+          </section>
+
+          <section className="chat-scrollbar min-h-0 overflow-y-auto rounded-lg border border-anubis-violet/15 bg-[#080512]/55 p-4 shadow-panel backdrop-blur">
+            {findings.length ? (
+              <div className="flex flex-col gap-4">
+                {findings.map((finding, index) => (
+                  <article key={`${finding.name}-${index}`} className="rounded-lg border border-white/10 bg-white/[.04] p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-base font-semibold tracking-[.04em] text-anubis-text">{finding.name}</div>
+                        <div className="mt-1 text-xs uppercase tracking-[.14em] text-anubis-faint">
+                          {finding.type} / {finding.matched_at}
+                        </div>
+                      </div>
+                      <SeverityBadge severity={finding.severity} />
+                    </div>
+
+                    {finding.evidence ? (
+                      <div className="mt-4 grid gap-3">
+                        {Object.entries(finding.evidence).map(([key, value]) => (
+                          <div key={key} className="rounded-md border border-white/10 bg-[#05030c]/70 p-3">
+                            <div className="mb-2 text-[10px] font-semibold uppercase tracking-[.18em] text-anubis-faint">
+                              {key.replaceAll("_", " ")}
+                            </div>
+                            <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-anubis-muted">
+                              {formatEvidenceValue(value)}
+                            </pre>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="flex h-full min-h-[260px] items-center justify-center text-sm uppercase tracking-[.18em] text-anubis-faint">
+                No confirmed vulnerabilities.
+              </div>
+            )}
+          </section>
+        </>
+      ) : (
+        <section className="flex min-h-[420px] items-center justify-center rounded-lg border border-anubis-violet/15 bg-[#080512]/55 p-6 text-center text-sm uppercase tracking-[.18em] text-anubis-faint shadow-panel backdrop-blur">
+          No report available.
+        </section>
+      )}
+    </div>
+  );
+}
+
+function ReportMetric({ label, value }) {
+  return (
+    <div className="min-h-[92px] rounded-lg border border-anubis-violet/15 bg-[#080512]/55 p-4 shadow-panel backdrop-blur">
+      <div className="text-[10px] font-semibold uppercase tracking-[.2em] text-anubis-faint">{label}</div>
+      <div className="mt-3 break-words text-sm font-semibold tracking-[.04em] text-anubis-text">{value}</div>
+    </div>
+  );
+}
+
 function ModeToggle({ mode, onChange }) {
   return (
     <div className="absolute left-7 top-[22px] z-[9999] flex rounded-full border border-anubis-violet/20 bg-[#120a23]/30 p-1 backdrop-blur">
-      {["voice", "chat", "settings"].map((item) => {
+      {["voice", "chat", "reports", "settings"].map((item) => {
         const active = mode === item;
 
         return (
