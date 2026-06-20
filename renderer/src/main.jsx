@@ -111,50 +111,54 @@ function encodeWav(samples, sampleRate) {
   return buffer;
 }
 
-function recordWavFromStream(stream, durationMs = 6000) {
-  return new Promise((resolve, reject) => {
-    if (typeof MediaRecorder === "undefined") {
-      reject(new Error("MediaRecorder unavailable."));
-      return;
-    }
+async function recordWavFromStream(stream, durationMs = 6000) {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) {
+    throw new Error("AudioContext unavailable.");
+  }
 
-    const chunks = [];
-    const recorder = new MediaRecorder(stream);
-
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        chunks.push(event.data);
-      }
-    };
-
-    recorder.onerror = () => {
-      reject(new Error("Audio recorder failed."));
-    };
-
-    recorder.onstop = async () => {
-      try {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContext) {
-          reject(new Error("AudioContext unavailable."));
-          return;
+  const audioContext = new AudioContext();
+  const source = audioContext.createMediaStreamSource(stream);
+  const silentGain = audioContext.createGain();
+  const samples = [];
+  const workletSource = `
+    class AnubisRecorder extends AudioWorkletProcessor {
+      process(inputs) {
+        const input = inputs[0] && inputs[0][0];
+        if (input) {
+          this.port.postMessage(input.slice(0));
         }
-
-        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-        const encodedAudio = await blob.arrayBuffer();
-        const audioContext = new AudioContext();
-        const audioBuffer = await audioContext.decodeAudioData(encodedAudio);
-        const channel = audioBuffer.getChannelData(0);
-        const wavBuffer = encodeWav(channel, audioBuffer.sampleRate);
-        await audioContext.close();
-        resolve(wavBuffer);
-      } catch (error) {
-        reject(error);
+        return true;
       }
+    }
+    registerProcessor("anubis-recorder", AnubisRecorder);
+  `;
+  const workletUrl = URL.createObjectURL(new Blob([workletSource], { type: "application/javascript" }));
+
+  try {
+    await audioContext.audioWorklet.addModule(workletUrl);
+    const recorderNode = new AudioWorkletNode(audioContext, "anubis-recorder");
+    silentGain.gain.value = 0;
+    recorderNode.port.onmessage = (event) => {
+      samples.push(...event.data);
     };
 
-    recorder.start();
-    window.setTimeout(() => recorder.stop(), durationMs);
-  });
+    source.connect(recorderNode);
+    recorderNode.connect(silentGain);
+    silentGain.connect(audioContext.destination);
+
+    await wait(durationMs);
+
+    source.disconnect();
+    recorderNode.disconnect();
+    silentGain.disconnect();
+    recorderNode.port.close();
+
+    return encodeWav(Float32Array.from(samples), audioContext.sampleRate);
+  } finally {
+    URL.revokeObjectURL(workletUrl);
+    await audioContext.close();
+  }
 }
 
 function normalizeTarget(rawTarget) {
