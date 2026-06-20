@@ -412,11 +412,6 @@ function App() {
     micStreamRef.current = stream;
     startAudioMeter(stream);
 
-    const recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.interimResults = true;
-    recognition.continuous = false;
-    recognitionRef.current = recognition;
     setIsListening(true);
     setVoiceError("");
     setVoiceTranscript("");
@@ -437,6 +432,12 @@ function App() {
       stopVoiceInput();
       return;
     }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+    recognitionRef.current = recognition;
 
     recognition.onresult = (event) => {
       let transcript = "";
