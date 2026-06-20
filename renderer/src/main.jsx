@@ -1366,6 +1366,8 @@ function VoicePage({
   onVoiceMuteToggle,
   onVoiceVolumeChange
 }) {
+  const [volumeOpen, setVolumeOpen] = useState(false);
+
   return (
     <div className="grid h-full w-full grid-rows-[1fr_auto_auto] place-items-center">
       <section className="mb-[2vh] flex min-h-[120px] items-center justify-center self-end" />
@@ -1398,19 +1400,35 @@ function VoicePage({
             {voiceMuted ? "Muted" : "Voice on"}
           </button>
         </div>
-        <label className="flex w-full items-center gap-3 rounded-lg border border-anubis-violet/15 bg-[#080512]/55 px-4 py-3 text-xs font-semibold uppercase tracking-[.16em] text-anubis-faint shadow-panel">
-          Volume
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={voiceVolume}
-            onChange={(event) => onVoiceVolumeChange(Number(event.target.value))}
-            className="h-2 flex-1 accent-anubis-bright"
-          />
-          <span className="w-10 text-right text-anubis-text">{Math.round(voiceVolume * 100)}%</span>
-        </label>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setVolumeOpen((open) => !open)}
+            aria-label="Voice volume"
+            title="Voice volume"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-anubis-violet/20 bg-[#120a23]/40 text-sm text-anubis-muted transition hover:bg-anubis-violet/15 hover:text-anubis-bright"
+          >
+            <span className="relative flex h-4 w-5 items-end gap-[3px]" aria-hidden="true">
+              <span className="h-2 w-[3px] rounded-full bg-current" />
+              <span className={["w-[3px] rounded-full bg-current", voiceMuted || voiceVolume < 0.35 ? "h-2 opacity-30" : "h-3"].join(" ")} />
+              <span className={["w-[3px] rounded-full bg-current", voiceMuted || voiceVolume < 0.7 ? "h-2 opacity-30" : "h-4"].join(" ")} />
+            </span>
+          </button>
+          {volumeOpen ? (
+            <div className="absolute bottom-12 left-1/2 flex h-40 w-12 -translate-x-1/2 flex-col items-center justify-center rounded-full border border-anubis-violet/20 bg-[#080512]/95 py-4 shadow-panel backdrop-blur">
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={voiceVolume}
+                onChange={(event) => onVoiceVolumeChange(Number(event.target.value))}
+                aria-label="Voice volume level"
+                className="vertical-volume h-28 accent-anubis-bright"
+              />
+            </div>
+          ) : null}
+        </div>
         <div className="flex min-h-[58px] w-full items-center justify-center rounded-lg border border-anubis-violet/15 bg-[#080512]/55 px-4 py-3 text-center text-sm leading-relaxed text-anubis-text shadow-panel">
           {transcript || (isListening ? "Listening..." : "Awaiting voice command.")}
         </div>

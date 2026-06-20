@@ -113,3 +113,8 @@ select {
     transform: rotate(360deg);
   }
 }
+
+.vertical-volume {
+  width: 112px;
+  transform: rotate(-90deg);
+}
