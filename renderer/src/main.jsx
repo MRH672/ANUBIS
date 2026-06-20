@@ -140,11 +140,15 @@ function App() {
   ]);
   const [wsStatus, setWsStatus] = useState("disconnected");
   const [isListening, setIsListening] = useState(false);
+  const [voiceLevel, setVoiceLevel] = useState(0);
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [orbState, setOrbState] = useState("idle");
   const [subtitle, setSubtitle] = useState("Boot sequence started.");
   const dataRef = useRef({ selectedScenario: null, selectedMachine: null });
   const modeRef = useRef("voice");
+  const audioContextRef = useRef(null);
+  const analyserFrameRef = useRef(null);
+  const micStreamRef = useRef(null);
   const recognitionRef = useRef(null);
   const sequenceRunningRef = useRef(false);
   const websocketRef = useRef(null);
@@ -292,7 +296,48 @@ function App() {
     });
   }, [commandHistory]);
 
-  const startVoiceCommand = useCallback(() => {
+  const stopVoiceInput = useCallback((stopRecognition = true) => {
+    if (analyserFrameRef.current) {
+      cancelAnimationFrame(analyserFrameRef.current);
+      analyserFrameRef.current = null;
+    }
+
+    micStreamRef.current?.getTracks().forEach((track) => track.stop());
+    micStreamRef.current = null;
+    audioContextRef.current?.close();
+    audioContextRef.current = null;
+    if (stopRecognition) {
+      recognitionRef.current?.stop();
+    }
+    recognitionRef.current = null;
+    setIsListening(false);
+    setVoiceLevel(0);
+  }, []);
+
+  const startAudioMeter = useCallback((stream) => {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+
+    const audioContext = new AudioContext();
+    const analyser = audioContext.createAnalyser();
+    const source = audioContext.createMediaStreamSource(stream);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    audioContextRef.current = audioContext;
+
+    const tick = () => {
+      analyser.getByteTimeDomainData(data);
+      const peak = data.reduce((max, value) => Math.max(max, Math.abs(value - 128)), 0);
+      setVoiceLevel(Math.min(100, Math.round((peak / 128) * 100)));
+      analyserFrameRef.current = requestAnimationFrame(tick);
+    };
+
+    tick();
+  }, []);
+
+  const startVoiceCommand = useCallback(async () => {
     const SpeechRecognition = getSpeechRecognition();
     if (!SpeechRecognition) {
       setSubtitle("Speech recognition unavailable in this browser runtime.");
@@ -300,9 +345,20 @@ function App() {
     }
 
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
+      stopVoiceInput();
       return;
     }
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setSubtitle("Microphone permission denied or unavailable.");
+      return;
+    }
+
+    micStreamRef.current = stream;
+    startAudioMeter(stream);
 
     const recognition = new SpeechRecognition();
     recognition.lang = "en-US";
@@ -336,21 +392,19 @@ function App() {
 
     recognition.onerror = () => {
       setSubtitle("Voice interpreter failed.");
-      setIsListening(false);
       setOrbState("idle");
-      recognitionRef.current = null;
+      stopVoiceInput();
     };
 
     recognition.onend = () => {
-      setIsListening(false);
-      recognitionRef.current = null;
+      stopVoiceInput(false);
       if (!sequenceRunningRef.current) {
         setOrbState("idle");
       }
     };
 
     recognition.start();
-  }, [sendOperatorCommand]);
+  }, [sendOperatorCommand, startAudioMeter, stopVoiceInput]);
 
   const loadProjectData = useCallback(async () => {
     try {
@@ -551,9 +605,9 @@ function App() {
 
     return () => {
       websocketRef.current?.close();
-      recognitionRef.current?.stop();
+      stopVoiceInput();
     };
-  }, [connectRellSocket]);
+  }, [connectRellSocket, stopVoiceInput]);
 
   useEffect(() => {
     const onKeyDown = async (event) => {
@@ -607,6 +661,7 @@ function App() {
         historyIndex={historyIndex}
         subtitle={subtitle}
         isListening={isListening}
+        voiceLevel={voiceLevel}
         voiceTranscript={voiceTranscript}
         wsStatus={wsStatus}
         onChatDraftChange={setChatDraft}
@@ -654,6 +709,7 @@ function AppShell({
   orbState,
   subtitle,
   voiceTranscript,
+  voiceLevel,
   wsStatus,
   onChatDraftChange,
   onCommandHistoryNavigate,
@@ -706,6 +762,7 @@ function AppShell({
             orbState={orbState}
             subtitle={subtitle}
             transcript={voiceTranscript}
+            voiceLevel={voiceLevel}
             wsStatus={wsStatus}
             onVoiceCommandStart={onVoiceCommandStart}
           />
@@ -715,7 +772,7 @@ function AppShell({
   );
 }
 
-function VoicePage({ isListening, orbState, subtitle, transcript, wsStatus, onVoiceCommandStart }) {
+function VoicePage({ isListening, orbState, subtitle, transcript, voiceLevel, wsStatus, onVoiceCommandStart }) {
   return (
     <div className="grid h-full w-full grid-rows-[1fr_auto_auto] place-items-center">
       <section className="mb-[2vh] flex min-h-[120px] items-center justify-center self-end" />
@@ -736,6 +793,12 @@ function VoicePage({ isListening, orbState, subtitle, transcript, wsStatus, onVo
         <div className="min-h-[22px] text-center text-xs tracking-[.12em] text-anubis-faint">
           Rell WS: {wsStatus}
           {transcript ? ` | ${transcript}` : ""}
+        </div>
+        <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+          <div
+            className="h-full rounded-full bg-anubis-bright transition-[width]"
+            style={{ width: `${voiceLevel}%` }}
+          />
         </div>
       </div>
       <Subtitle text={subtitle} />
