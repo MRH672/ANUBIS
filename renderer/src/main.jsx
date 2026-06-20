@@ -334,6 +334,11 @@ function App() {
   const [voiceLevel, setVoiceLevel] = useState(0);
   const [voiceError, setVoiceError] = useState("");
   const [voiceTranscript, setVoiceTranscript] = useState("");
+  const [voiceMuted, setVoiceMuted] = useState(() => window.localStorage.getItem("anubis:voiceMuted") === "true");
+  const [voiceVolume, setVoiceVolume] = useState(() => {
+    const saved = Number(window.localStorage.getItem("anubis:voiceVolume"));
+    return Number.isFinite(saved) ? Math.min(1, Math.max(0, saved)) : 0.9;
+  });
   const [orbState, setOrbState] = useState("idle");
   const [selectedMicId, setSelectedMicId] = useState(() => window.localStorage.getItem("anubis:selectedMicId") || "");
   const [selectedScanModules, setSelectedScanModules] = useState(() => {
@@ -364,6 +369,21 @@ function App() {
   const recognitionRef = useRef(null);
   const sequenceRunningRef = useRef(false);
   const voiceTimeoutRef = useRef(null);
+  const voiceMutedRef = useRef(voiceMuted);
+  const voiceVolumeRef = useRef(voiceVolume);
+
+  useEffect(() => {
+    voiceMutedRef.current = voiceMuted;
+    window.localStorage.setItem("anubis:voiceMuted", String(voiceMuted));
+    if (voiceMuted) {
+      window.speechSynthesis?.cancel();
+    }
+  }, [voiceMuted]);
+
+  useEffect(() => {
+    voiceVolumeRef.current = voiceVolume;
+    window.localStorage.setItem("anubis:voiceVolume", String(voiceVolume));
+  }, [voiceVolume]);
 
   const closeWindow = useCallback(() => {
     if (window.electronAPI && typeof window.electronAPI.closeWindow === "function") {
@@ -445,6 +465,18 @@ function App() {
     });
   }, []);
 
+  const speakVoiceStep = useCallback((text) => {
+    if (voiceMutedRef.current || !window.speechSynthesis) return;
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "en-US";
+    utterance.rate = 0.92;
+    utterance.pitch = 0.85;
+    utterance.volume = voiceVolumeRef.current;
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
   const sendOperatorCommand = useCallback(async (prompt, source = "chat") => {
     const commandText = prompt.trim();
     if (!commandText) return;
@@ -469,6 +501,9 @@ function App() {
     ]);
     setOrbState("thinking");
     setSubtitle(`Target: ${targetUrl}. Modules: ${moduleLabel}.`);
+    if (source === "voice") {
+      speakVoiceStep(`Accepted command. Target ${targetUrl}. Modules ${moduleLabel}.`);
+    }
 
     const steps = [
       `Preparing scan workspace for ${targetUrl}.`,
@@ -486,6 +521,9 @@ function App() {
         { id: activeId, role: "system", text: step, active: true }
       ]);
       setSubtitle(step);
+      if (source === "voice") {
+        speakVoiceStep(step);
+      }
       await wait(randomDelay(scanDelayRange.min, scanDelayRange.max));
       setChatMessages((messages) =>
         messages.map((message) => (message.id === activeId ? { ...message, active: false } : message))
@@ -500,12 +538,15 @@ function App() {
     modeRef.current = "reports";
     setInteractionMode("reports");
     setSubtitle(`Report ready for ${targetUrl}.`);
+    if (source === "voice") {
+      speakVoiceStep(`Report ready for ${targetUrl}.`);
+    }
     setChatMessages((messages) => [
       ...messages,
       { id: Date.now() + Math.random(), role: "system", text: `Report ready for ${targetUrl}.` }
     ]);
     setOrbState("idle");
-  }, [scanDelayRange.max, scanDelayRange.min, selectedScanModules]);
+  }, [scanDelayRange.max, scanDelayRange.min, selectedScanModules, speakVoiceStep]);
 
   const submitChatPrompt = useCallback((event) => {
     event.preventDefault();
@@ -830,11 +871,11 @@ function App() {
     }
 
     setOrbState("idle");
-    setSubtitle(`${modeRef.current === "voice" ? "Voice" : "Chat"} mode ready. Execution sequence idle.`);
+    setSubtitle(`${modeRef.current === "voice" ? "Voice" : "Chat"} mode ready.`);
     sequenceRunningRef.current = false;
   }, []);
 
-  const playDemoAuthenticationFlow = useCallback(async () => {
+  const playAuthenticationFlow = useCallback(async () => {
     if (sequenceRunningRef.current) return;
     sequenceRunningRef.current = true;
 
@@ -927,6 +968,7 @@ function App() {
   useEffect(() => {
     return () => {
       window.electronAPI?.stopNativeVoice?.();
+      window.speechSynthesis?.cancel();
       stopVoiceInput();
     };
   }, [stopVoiceInput]);
@@ -998,6 +1040,14 @@ function App() {
       const isTextInput = targetTag === "input" || targetTag === "textarea";
       const key = event.key.toLowerCase();
 
+      if (event.ctrlKey && key === "a" && !isTextInput) {
+        event.preventDefault();
+        modeRef.current = "voice";
+        setInteractionMode("voice");
+        startVoiceCommand();
+        return;
+      }
+
       if (key === "t" && modeRef.current === "voice") {
         event.preventDefault();
         setOrbState("thinking");
@@ -1024,7 +1074,7 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeWindow, playCinematicIntro, playDemoAuthenticationFlow, playIntroSequence]);
+  }, [closeWindow, playAuthenticationFlow, playCinematicIntro, playIntroSequence, startVoiceCommand]);
 
   return (
     <>
@@ -1047,6 +1097,8 @@ function App() {
         voiceLevel={voiceLevel}
         voiceError={voiceError}
         voiceTranscript={voiceTranscript}
+        voiceMuted={voiceMuted}
+        voiceVolume={voiceVolume}
         onChatDraftChange={setChatDraft}
         onCommandHistoryNavigate={navigateCommandHistory}
         onChatPromptSubmit={submitChatPrompt}
@@ -1055,6 +1107,8 @@ function App() {
         onMicRefresh={refreshAudioInputDevices}
         onModuleToggle={toggleScanModule}
         onScanDelayRangeChange={changeScanDelayRange}
+        onVoiceMuteToggle={() => setVoiceMuted((muted) => !muted)}
+        onVoiceVolumeChange={setVoiceVolume}
         onClose={closeWindow}
         onMaximize={maximizeWindow}
         onMinimize={minimizeWindow}
@@ -1103,6 +1157,8 @@ function AppShell({
   voiceTranscript,
   voiceLevel,
   voiceError,
+  voiceMuted,
+  voiceVolume,
   onChatDraftChange,
   onCommandHistoryNavigate,
   onChatPromptSubmit,
@@ -1111,6 +1167,8 @@ function AppShell({
   onMicRefresh,
   onModuleToggle,
   onScanDelayRangeChange,
+  onVoiceMuteToggle,
+  onVoiceVolumeChange,
   onClose,
   onMaximize,
   onMinimize,
@@ -1173,6 +1231,10 @@ function AppShell({
             transcript={voiceTranscript}
             voiceLevel={voiceLevel}
             voiceError={voiceError}
+            voiceMuted={voiceMuted}
+            voiceVolume={voiceVolume}
+            onVoiceMuteToggle={onVoiceMuteToggle}
+            onVoiceVolumeChange={onVoiceVolumeChange}
             onVoiceCommandStart={onVoiceCommandStart}
           />
         )}
@@ -1291,26 +1353,66 @@ function SettingsPage({
   );
 }
 
-function VoicePage({ isListening, orbState, subtitle, transcript, voiceLevel, voiceError, onVoiceCommandStart }) {
+function VoicePage({
+  isListening,
+  orbState,
+  subtitle,
+  transcript,
+  voiceLevel,
+  voiceError,
+  voiceMuted,
+  voiceVolume,
+  onVoiceCommandStart,
+  onVoiceMuteToggle,
+  onVoiceVolumeChange
+}) {
   return (
     <div className="grid h-full w-full grid-rows-[1fr_auto_auto] place-items-center">
       <section className="mb-[2vh] flex min-h-[120px] items-center justify-center self-end" />
       <Orb state={orbState} />
       <div className="mt-1 flex w-[min(640px,90vw)] flex-col items-center gap-3">
-        <button
-          type="button"
-          onClick={onVoiceCommandStart}
-          className={[
-            "h-10 rounded-full border px-5 text-xs font-semibold uppercase tracking-[.2em] transition",
-            isListening
-              ? "border-anubis-bright/40 bg-anubis-violet/25 text-white"
-              : "border-anubis-violet/20 bg-[#120a23]/40 text-anubis-muted hover:bg-anubis-violet/15 hover:text-anubis-bright"
-          ].join(" ")}
-        >
-          {isListening ? "Listening" : "Voice command"}
-        </button>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <button
+            type="button"
+            onClick={onVoiceCommandStart}
+            className={[
+              "h-10 rounded-full border px-5 text-xs font-semibold uppercase tracking-[.2em] transition",
+              isListening
+                ? "border-anubis-bright/40 bg-anubis-violet/25 text-white"
+                : "border-anubis-violet/20 bg-[#120a23]/40 text-anubis-muted hover:bg-anubis-violet/15 hover:text-anubis-bright"
+            ].join(" ")}
+          >
+            {isListening ? "Listening" : "Voice command"}
+          </button>
+          <button
+            type="button"
+            onClick={onVoiceMuteToggle}
+            aria-pressed={voiceMuted}
+            className={[
+              "h-10 rounded-full border px-5 text-xs font-semibold uppercase tracking-[.2em] transition",
+              voiceMuted
+                ? "border-red-300/30 bg-red-500/10 text-red-100"
+                : "border-anubis-bright/25 bg-anubis-violet/20 text-anubis-text hover:bg-anubis-violet/30 hover:text-white"
+            ].join(" ")}
+          >
+            {voiceMuted ? "Muted" : "Voice on"}
+          </button>
+        </div>
+        <label className="flex w-full items-center gap-3 rounded-lg border border-anubis-violet/15 bg-[#080512]/55 px-4 py-3 text-xs font-semibold uppercase tracking-[.16em] text-anubis-faint shadow-panel">
+          Volume
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={voiceVolume}
+            onChange={(event) => onVoiceVolumeChange(Number(event.target.value))}
+            className="h-2 flex-1 accent-anubis-bright"
+          />
+          <span className="w-10 text-right text-anubis-text">{Math.round(voiceVolume * 100)}%</span>
+        </label>
         <div className="flex min-h-[58px] w-full items-center justify-center rounded-lg border border-anubis-violet/15 bg-[#080512]/55 px-4 py-3 text-center text-sm leading-relaxed text-anubis-text shadow-panel">
-          {transcript || (isListening ? "Listening..." : "Voice transcript will appear here.")}
+          {transcript || (isListening ? "Listening..." : "Awaiting voice command.")}
         </div>
         {voiceError ? (
           <div className="max-w-full rounded-md border border-red-300/20 bg-red-500/10 px-3 py-2 text-center text-xs leading-relaxed text-red-100">
