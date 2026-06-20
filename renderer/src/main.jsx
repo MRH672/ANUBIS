@@ -503,8 +503,7 @@ function App() {
     setOrbState("thinking");
     setSubtitle(`Target: ${targetUrl}. Modules: ${moduleLabel}.`);
     if (source === "voice") {
-      setVoiceTranscript(`Accepted command. Target: ${targetUrl}. Modules: ${moduleLabel}.`);
-      speakVoiceStep(`Accepted command. Target ${targetUrl}. Modules ${moduleLabel}.`);
+      setVoiceTranscript(`Test ${moduleLabel} on ${targetUrl}.`);
     }
 
     const steps = [
@@ -523,10 +522,6 @@ function App() {
         { id: activeId, role: "system", text: step, active: true }
       ]);
       setSubtitle(step);
-      if (source === "voice") {
-        setVoiceTranscript(step);
-        speakVoiceStep(step);
-      }
       await wait(randomDelay(scanDelayRange.min, scanDelayRange.max));
       setChatMessages((messages) =>
         messages.map((message) => (message.id === activeId ? { ...message, active: false } : message))
@@ -541,10 +536,6 @@ function App() {
     modeRef.current = "reports";
     setInteractionMode("reports");
     setSubtitle(`Report ready for ${targetUrl}.`);
-    if (source === "voice") {
-      setVoiceTranscript(`Report ready for ${targetUrl}.`);
-      speakVoiceStep(`Report ready for ${targetUrl}.`);
-    }
     setChatMessages((messages) => [
       ...messages,
       { id: Date.now() + Math.random(), role: "system", text: `Report ready for ${targetUrl}.` }
