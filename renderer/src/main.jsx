@@ -113,35 +113,47 @@ function encodeWav(samples, sampleRate) {
 
 function recordWavFromStream(stream, durationMs = 6000) {
   return new Promise((resolve, reject) => {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) {
-      reject(new Error("AudioContext unavailable."));
+    if (typeof MediaRecorder === "undefined") {
+      reject(new Error("MediaRecorder unavailable."));
       return;
     }
 
-    const audioContext = new AudioContext();
-    const source = audioContext.createMediaStreamSource(stream);
-    const processor = audioContext.createScriptProcessor(4096, 1, 1);
-    const silentGain = audioContext.createGain();
-    const samples = [];
+    const chunks = [];
+    const recorder = new MediaRecorder(stream);
 
-    silentGain.gain.value = 0;
-    processor.onaudioprocess = (event) => {
-      samples.push(...event.inputBuffer.getChannelData(0));
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        chunks.push(event.data);
+      }
     };
 
-    source.connect(processor);
-    processor.connect(silentGain);
-    silentGain.connect(audioContext.destination);
+    recorder.onerror = () => {
+      reject(new Error("Audio recorder failed."));
+    };
 
-    window.setTimeout(async () => {
-      processor.disconnect();
-      source.disconnect();
-      silentGain.disconnect();
-      const sampleRate = audioContext.sampleRate;
-      await audioContext.close();
-      resolve(encodeWav(Float32Array.from(samples), sampleRate));
-    }, durationMs);
+    recorder.onstop = async () => {
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) {
+          reject(new Error("AudioContext unavailable."));
+          return;
+        }
+
+        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        const encodedAudio = await blob.arrayBuffer();
+        const audioContext = new AudioContext();
+        const audioBuffer = await audioContext.decodeAudioData(encodedAudio);
+        const channel = audioBuffer.getChannelData(0);
+        const wavBuffer = encodeWav(channel, audioBuffer.sampleRate);
+        await audioContext.close();
+        resolve(wavBuffer);
+      } catch (error) {
+        reject(error);
+      }
+    };
+
+    recorder.start();
+    window.setTimeout(() => recorder.stop(), durationMs);
   });
 }
 
