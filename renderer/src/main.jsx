@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { Mic, Volume2, VolumeX } from "lucide-react";
 import "./styles.css";
 
 const introWords = ["WELCOME", "TO", "ANUBIS"];
@@ -1366,8 +1367,6 @@ function VoicePage({
   onVoiceMuteToggle,
   onVoiceVolumeChange
 }) {
-  const [volumeOpen, setVolumeOpen] = useState(false);
-
   return (
     <div className="grid h-full w-full grid-rows-[1fr_auto_auto] place-items-center">
       <section className="mb-[2vh] flex min-h-[120px] items-center justify-center self-end" />
@@ -1378,44 +1377,36 @@ function VoicePage({
             type="button"
             onClick={onVoiceCommandStart}
             className={[
-              "h-10 rounded-full border px-5 text-xs font-semibold uppercase tracking-[.2em] transition",
+              "flex h-10 items-center rounded-full border px-5 text-xs font-semibold uppercase tracking-[.2em] transition",
               isListening
                 ? "border-anubis-bright/40 bg-anubis-violet/25 text-white"
                 : "border-anubis-violet/20 bg-[#120a23]/40 text-anubis-muted hover:bg-anubis-violet/15 hover:text-anubis-bright"
             ].join(" ")}
           >
+            <Mic className="mr-2 h-4 w-4" aria-hidden="true" />
             {isListening ? "Listening" : "Voice command"}
           </button>
-          <button
-            type="button"
-            onClick={onVoiceMuteToggle}
-            aria-pressed={voiceMuted}
-            className={[
-              "h-10 rounded-full border px-5 text-xs font-semibold uppercase tracking-[.2em] transition",
-              voiceMuted
-                ? "border-red-300/30 bg-red-500/10 text-red-100"
-                : "border-anubis-bright/25 bg-anubis-violet/20 text-anubis-text hover:bg-anubis-violet/30 hover:text-white"
-            ].join(" ")}
-          >
-            {voiceMuted ? "Muted" : "Voice on"}
-          </button>
-        </div>
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => setVolumeOpen((open) => !open)}
-            aria-label="Voice volume"
-            title="Voice volume"
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-anubis-violet/20 bg-[#120a23]/40 text-sm text-anubis-muted transition hover:bg-anubis-violet/15 hover:text-anubis-bright"
-          >
-            <span className="relative flex h-4 w-5 items-end gap-[3px]" aria-hidden="true">
-              <span className="h-2 w-[3px] rounded-full bg-current" />
-              <span className={["w-[3px] rounded-full bg-current", voiceMuted || voiceVolume < 0.35 ? "h-2 opacity-30" : "h-3"].join(" ")} />
-              <span className={["w-[3px] rounded-full bg-current", voiceMuted || voiceVolume < 0.7 ? "h-2 opacity-30" : "h-4"].join(" ")} />
-            </span>
-          </button>
-          {volumeOpen ? (
-            <div className="absolute bottom-12 left-1/2 flex h-40 w-12 -translate-x-1/2 flex-col items-center justify-center rounded-full border border-anubis-violet/20 bg-[#080512]/95 py-4 shadow-panel backdrop-blur">
+          <div className="group relative">
+            <button
+              type="button"
+              onClick={onVoiceMuteToggle}
+              aria-pressed={voiceMuted}
+              aria-label={voiceMuted ? "Unmute voice" : "Mute voice"}
+              title={voiceMuted ? "Unmute voice" : "Mute voice"}
+              className={[
+                "flex h-10 w-10 items-center justify-center rounded-full border transition",
+                voiceMuted
+                  ? "border-red-300/30 bg-red-500/10 text-red-100"
+                  : "border-anubis-violet/20 bg-[#120a23]/40 text-anubis-muted hover:bg-anubis-violet/15 hover:text-anubis-bright"
+              ].join(" ")}
+            >
+              {voiceMuted || voiceVolume === 0 ? (
+                <VolumeX className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <Volume2 className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
+            <div className="pointer-events-none absolute bottom-12 left-1/2 flex h-40 w-12 -translate-x-1/2 flex-col items-center justify-center rounded-full border border-anubis-violet/20 bg-[#080512]/95 py-4 opacity-0 shadow-panel backdrop-blur transition group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
               <input
                 type="range"
                 min="0"
@@ -1427,7 +1418,7 @@ function VoicePage({
                 className="vertical-volume h-28 accent-anubis-bright"
               />
             </div>
-          ) : null}
+          </div>
         </div>
         <div className="flex min-h-[58px] w-full items-center justify-center rounded-lg border border-anubis-violet/15 bg-[#080512]/55 px-4 py-3 text-center text-sm leading-relaxed text-anubis-text shadow-panel">
           {transcript || (isListening ? "Listening..." : "Awaiting voice command.")}
