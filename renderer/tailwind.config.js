@@ -43,8 +43,9 @@ module.exports = {
           "50%": { transform: "scale(1.04)" }
         },
         orbSpeaking: {
-          "0%, 100%": { transform: "scale(1)", filter: "brightness(1)" },
-          "50%": { transform: "scale(1.06)", filter: "brightness(1.12)" }
+          "0%, 100%": { transform: "scale(.99)", filter: "brightness(1)" },
+          "35%": { transform: "scale(1.08)", filter: "brightness(1.14)" },
+          "70%": { transform: "scale(1.01)", filter: "brightness(1.05)" }
         },
         orbShimmer: {
           from: { transform: "rotate(0deg)" },
@@ -64,7 +65,7 @@ module.exports = {
         cinematicWordOut: "cinematicWordOut 700ms ease forwards",
         orbIdle: "orbIdle 5.5s ease-in-out infinite",
         orbThinking: "orbThinking 1.6s ease-in-out infinite",
-        orbSpeaking: "orbSpeaking 1s ease-in-out infinite",
+        orbSpeaking: "orbSpeaking .72s ease-in-out infinite",
         orbShimmer: "orbShimmer 7s linear infinite",
         slowPulse: "slowPulse 6s ease-in-out infinite",
         slowPulseReverse: "slowPulse 4.8s ease-in-out infinite reverse",

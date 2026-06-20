@@ -372,6 +372,7 @@ function App() {
   const voiceTimeoutRef = useRef(null);
   const voiceMutedRef = useRef(voiceMuted);
   const voiceVolumeRef = useRef(voiceVolume);
+  const speechTokenRef = useRef(0);
 
   useEffect(() => {
     voiceMutedRef.current = voiceMuted;
@@ -466,15 +467,32 @@ function App() {
     });
   }, []);
 
-  const speakVoiceStep = useCallback((text) => {
+  const speakVoiceStep = useCallback((text, afterEndState = "thinking") => {
     if (voiceMutedRef.current || !window.speechSynthesis) return;
 
+    const speechToken = speechTokenRef.current + 1;
+    speechTokenRef.current = speechToken;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "en-US";
     utterance.rate = 0.92;
     utterance.pitch = 0.85;
     utterance.volume = voiceVolumeRef.current;
+    utterance.onstart = () => {
+      if (speechTokenRef.current === speechToken) {
+        setOrbState("speaking");
+      }
+    };
+    utterance.onend = () => {
+      if (speechTokenRef.current === speechToken) {
+        setOrbState(afterEndState);
+      }
+    };
+    utterance.onerror = () => {
+      if (speechTokenRef.current === speechToken) {
+        setOrbState(afterEndState);
+      }
+    };
     window.speechSynthesis.speak(utterance);
   }, []);
 
@@ -522,6 +540,9 @@ function App() {
         { id: activeId, role: "system", text: step, active: true }
       ]);
       setSubtitle(step);
+      if (source === "voice") {
+        speakVoiceStep(step);
+      }
       await wait(randomDelay(scanDelayRange.min, scanDelayRange.max));
       setChatMessages((messages) =>
         messages.map((message) => (message.id === activeId ? { ...message, active: false } : message))
@@ -536,11 +557,16 @@ function App() {
     modeRef.current = "reports";
     setInteractionMode("reports");
     setSubtitle(`Report ready for ${targetUrl}.`);
+    if (source === "voice") {
+      speakVoiceStep(`Report ready for ${targetUrl}.`, "idle");
+    }
     setChatMessages((messages) => [
       ...messages,
       { id: Date.now() + Math.random(), role: "system", text: `Report ready for ${targetUrl}.` }
     ]);
-    setOrbState("idle");
+    if (source !== "voice" || voiceMutedRef.current || !window.speechSynthesis) {
+      setOrbState("idle");
+    }
   }, [scanDelayRange.max, scanDelayRange.min, selectedScanModules, speakVoiceStep]);
 
   const submitChatPrompt = useCallback((event) => {
