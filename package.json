@@ -5,6 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "npm run build:renderer && electron .",
+    "debug": "ANUBIS_DEBUG=1 npm run build:renderer && ANUBIS_DEBUG=1 electron .",
     "dev": "vite --host 127.0.0.1 --config renderer/vite.config.mjs",
     "build:renderer": "vite build --config renderer/vite.config.mjs",
     "build": "npm run build:renderer && electron-builder",

@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, session } = require("electron");
 const path = require("path");
 
 let mainWindow;
+const isDebug = process.env.ANUBIS_DEBUG === "1";
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -16,6 +17,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      devTools: isDebug,
       preload: path.join(__dirname, "preload.js")
     }
   });
@@ -31,6 +33,30 @@ function createWindow() {
 
   mainWindow.webContents.on("did-finish-load", () => {
     console.log("Renderer loaded successfully.");
+    if (isDebug) {
+      mainWindow.webContents.openDevTools({ mode: "detach" });
+    }
+  });
+
+  if (isDebug) {
+    mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+      console.log(`[renderer:${level}] ${message} (${sourceId}:${line})`);
+    });
+
+    mainWindow.webContents.on("render-process-gone", (_event, details) => {
+      console.error("render-process-gone:", details);
+    });
+
+    mainWindow.webContents.on("before-input-event", (event, input) => {
+      if (input.control && input.shift && input.key.toLowerCase() === "i") {
+        mainWindow.webContents.toggleDevTools();
+        event.preventDefault();
+      }
+    });
+  }
+
+  mainWindow.webContents.on("unresponsive", () => {
+    console.error("Renderer became unresponsive.");
   });
 
   mainWindow.on("closed", () => {
