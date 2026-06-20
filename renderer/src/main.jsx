@@ -128,6 +128,7 @@ function App() {
   const [introWord, setIntroWord] = useState("WELCOME");
   const [introWordPhase, setIntroWordPhase] = useState("");
   const [interactionMode, setInteractionMode] = useState("voice");
+  const [audioInputDevices, setAudioInputDevices] = useState([]);
   const [chatDraft, setChatDraft] = useState("");
   const [commandHistory, setCommandHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -143,6 +144,7 @@ function App() {
   const [voiceLevel, setVoiceLevel] = useState(0);
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [orbState, setOrbState] = useState("idle");
+  const [selectedMicId, setSelectedMicId] = useState("");
   const [subtitle, setSubtitle] = useState("Boot sequence started.");
   const dataRef = useRef({ selectedScenario: null, selectedMachine: null });
   const modeRef = useRef("voice");
@@ -177,9 +179,34 @@ function App() {
 
     if (!sequenceRunningRef.current) {
       setOrbState("idle");
-      setSubtitle(`${mode === "voice" ? "Voice" : "Chat"} mode active. Demo sequence disabled.`);
+      setSubtitle(`${mode === "voice" ? "Voice" : mode === "chat" ? "Chat" : "Settings"} mode active. Demo sequence disabled.`);
     }
   }, []);
+
+  const refreshAudioInputDevices = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      setSubtitle("Audio device enumeration unavailable.");
+      return;
+    }
+
+    try {
+      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      permissionStream.getTracks().forEach((track) => track.stop());
+    } catch {
+      setSubtitle("Microphone permission denied or unavailable.");
+      return;
+    }
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const inputs = devices.filter((device) => device.kind === "audioinput");
+    setAudioInputDevices(inputs);
+
+    if (inputs.length && !inputs.some((device) => device.deviceId === selectedMicId)) {
+      setSelectedMicId(inputs[0].deviceId);
+    }
+
+    setSubtitle(inputs.length ? "Microphone devices refreshed." : "No microphone input devices found.");
+  }, [selectedMicId]);
 
   const connectRellSocket = useCallback(() => {
     const currentSocket = websocketRef.current;
@@ -314,6 +341,12 @@ function App() {
     setVoiceLevel(0);
   }, []);
 
+  const changeSelectedMic = useCallback((deviceId) => {
+    stopVoiceInput();
+    setSelectedMicId(deviceId);
+    setSubtitle("Microphone input changed.");
+  }, [stopVoiceInput]);
+
   const startAudioMeter = useCallback((stream) => {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (!AudioContext) return;
@@ -351,7 +384,9 @@ function App() {
 
     let stream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: selectedMicId ? { deviceId: { exact: selectedMicId } } : true
+      });
     } catch {
       setSubtitle("Microphone permission denied or unavailable.");
       return;
@@ -404,7 +439,7 @@ function App() {
     };
 
     recognition.start();
-  }, [sendOperatorCommand, startAudioMeter, stopVoiceInput]);
+  }, [selectedMicId, sendOperatorCommand, startAudioMeter, stopVoiceInput]);
 
   const loadProjectData = useCallback(async () => {
     try {
@@ -653,7 +688,9 @@ function App() {
       <CinematicIntro active={introActive} fading={introFading} word={introWord} phase={introWordPhase} />
       <AppShell
         hidden={appHidden}
+        audioInputDevices={audioInputDevices}
         orbState={orbState}
+        selectedMicId={selectedMicId}
         interactionMode={interactionMode}
         chatDraft={chatDraft}
         chatMessages={chatMessages}
@@ -668,6 +705,8 @@ function App() {
         onCommandHistoryNavigate={navigateCommandHistory}
         onChatPromptSubmit={submitChatPrompt}
         onChangeInteractionMode={changeInteractionMode}
+        onMicChange={changeSelectedMic}
+        onMicRefresh={refreshAudioInputDevices}
         onClose={closeWindow}
         onMaximize={maximizeWindow}
         onMinimize={minimizeWindow}
@@ -700,6 +739,7 @@ function CinematicIntro({ active, fading, word, phase }) {
 
 function AppShell({
   hidden,
+  audioInputDevices,
   chatDraft,
   chatMessages,
   commandHistory,
@@ -707,6 +747,7 @@ function AppShell({
   interactionMode,
   isListening,
   orbState,
+  selectedMicId,
   subtitle,
   voiceTranscript,
   voiceLevel,
@@ -715,6 +756,8 @@ function AppShell({
   onCommandHistoryNavigate,
   onChatPromptSubmit,
   onChangeInteractionMode,
+  onMicChange,
+  onMicRefresh,
   onClose,
   onMaximize,
   onMinimize,
@@ -744,7 +787,15 @@ function AppShell({
       <BackgroundLayer />
 
       <main className="relative z-[2] h-full w-full px-[4vw] pb-[5vh] pt-[4vh]">
-        {interactionMode === "chat" ? (
+        {interactionMode === "settings" ? (
+          <SettingsPage
+            audioInputDevices={audioInputDevices}
+            selectedMicId={selectedMicId}
+            subtitle={subtitle}
+            onMicChange={onMicChange}
+            onMicRefresh={onMicRefresh}
+          />
+        ) : interactionMode === "chat" ? (
           <ChatPage
             draft={chatDraft}
             messages={chatMessages}
@@ -768,6 +819,50 @@ function AppShell({
           />
         )}
       </main>
+    </div>
+  );
+}
+
+function SettingsPage({ audioInputDevices, selectedMicId, subtitle, onMicChange, onMicRefresh }) {
+  useEffect(() => {
+    onMicRefresh();
+  }, [onMicRefresh]);
+
+  return (
+    <div className="mx-auto flex h-full w-[min(760px,92vw)] flex-col gap-5 pt-24">
+      <header className="border-b border-anubis-violet/15 pb-4">
+        <div className="text-xs font-semibold uppercase tracking-[.28em] text-anubis-faint">ANUBIS SETTINGS</div>
+        <div className="mt-2 text-lg font-semibold tracking-[.08em] text-anubis-text">Input devices</div>
+      </header>
+
+      <section className="rounded-lg border border-anubis-violet/15 bg-[#080512]/55 p-5 shadow-panel backdrop-blur">
+        <div className="mb-3 text-xs font-semibold uppercase tracking-[.2em] text-anubis-faint">Microphone</div>
+        <div className="flex gap-3">
+          <select
+            value={selectedMicId}
+            onChange={(event) => onMicChange(event.target.value)}
+            className="h-11 flex-1 rounded-md border border-white/10 bg-[#05030c]/90 px-3 text-sm text-anubis-text outline-none focus:border-anubis-bright/45 focus:ring-2 focus:ring-anubis-violet/20"
+          >
+            {audioInputDevices.length ? (
+              audioInputDevices.map((device, index) => (
+                <option key={device.deviceId} value={device.deviceId}>
+                  {device.label || `Microphone ${index + 1}`}
+                </option>
+              ))
+            ) : (
+              <option value="">No microphone detected</option>
+            )}
+          </select>
+          <button
+            type="button"
+            onClick={onMicRefresh}
+            className="min-w-[118px] rounded-md border border-anubis-bright/25 bg-anubis-violet/20 px-4 text-xs font-semibold uppercase tracking-[.18em] text-anubis-text transition hover:bg-anubis-violet/30 hover:text-white"
+          >
+            Refresh
+          </button>
+        </div>
+        <div className="mt-4 text-xs leading-relaxed tracking-[.08em] text-anubis-faint">{subtitle}</div>
+      </section>
     </div>
   );
 }
@@ -911,7 +1006,7 @@ function ChatPage({
 function ModeToggle({ mode, onChange }) {
   return (
     <div className="absolute left-7 top-[22px] z-[9999] flex rounded-full border border-anubis-violet/20 bg-[#120a23]/30 p-1 backdrop-blur">
-      {["voice", "chat"].map((item) => {
+      {["voice", "chat", "settings"].map((item) => {
         const active = mode === item;
 
         return (
