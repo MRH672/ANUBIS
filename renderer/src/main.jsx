@@ -453,8 +453,12 @@ function App() {
 
       const cleanedTranscript = transcript.trim();
       setVoiceTranscript(cleanedTranscript);
+      if (cleanedTranscript) {
+        setSubtitle(`Heard: ${cleanedTranscript}`);
+      }
 
       if (finalTranscript.trim()) {
+        setSubtitle(`Understood: ${finalTranscript.trim()}`);
         sendOperatorCommand(finalTranscript.trim(), "voice");
       }
     };
@@ -691,7 +695,11 @@ function App() {
 
     return window.electronAPI.onNativeVoiceEvent((payload) => {
       if (payload.type === "partial") {
-        setVoiceTranscript(payload.text || "");
+        const text = payload.text || "";
+        setVoiceTranscript(text);
+        if (text.trim()) {
+          setSubtitle(`Hearing: ${text.trim()}`);
+        }
         return;
       }
 
@@ -699,6 +707,7 @@ function App() {
         const text = payload.text || "";
         setVoiceTranscript(text);
         if (text.trim()) {
+          setSubtitle(`Understood: ${text.trim()}`);
           sendOperatorCommand(text.trim(), "voice");
         }
         return;
@@ -980,7 +989,9 @@ function VoicePage({ isListening, orbState, subtitle, transcript, voiceLevel, vo
         </button>
         <div className="min-h-[22px] text-center text-xs tracking-[.12em] text-anubis-faint">
           Rell WS: {wsStatus}
-          {transcript ? ` | ${transcript}` : ""}
+        </div>
+        <div className="flex min-h-[58px] w-full items-center justify-center rounded-lg border border-anubis-violet/15 bg-[#080512]/55 px-4 py-3 text-center text-sm leading-relaxed text-anubis-text shadow-panel">
+          {transcript || (isListening ? "Listening..." : "Voice transcript will appear here.")}
         </div>
         {voiceError ? (
           <div className="max-w-full rounded-md border border-red-300/20 bg-red-500/10 px-3 py-2 text-center text-xs leading-relaxed text-red-100">
