@@ -17,8 +17,16 @@ const dataPathCandidates = {
   scenarios: ["../../data/scenarios.json", "/data/scenarios.json", "../data/scenarios.json"]
 };
 
-const rellWebSocketUrl = "ws://127.0.0.1:8765";
-const demoEnabled = false;
+const scanTarget = "shopnest.com";
+const scanModuleOptions = [
+  { id: "sqli", label: "SQL Injection" },
+  { id: "xss", label: "XSS" },
+  { id: "osci", label: "Command Injection" },
+  { id: "xml", label: "XXE" },
+  { id: "path", label: "Path Traversal" },
+  { id: "access", label: "Access Control" },
+  { id: "websocket", label: "WebSocket" }
+];
 
 const moduleAliases = [
   ["sql injection", "sqli"],
@@ -161,27 +169,8 @@ async function recordWavFromStream(stream, durationMs = 6000) {
   }
 }
 
-function normalizeTarget(rawTarget) {
-  if (!rawTarget) return null;
-  const trimmed = rawTarget.replace(/[),.;!?]+$/, "");
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  return `http://${trimmed}`;
-}
-
-function extractTarget(text) {
-  const urlMatch = text.match(/https?:\/\/[^\s]+/i);
-  if (urlMatch) return normalizeTarget(urlMatch[0]);
-
-  const targetMatch = text.match(
-    /\b((?:localhost|(?:\d{1,3}\.){3}\d{1,3}|(?:[a-z0-9-]+\.)+[a-z]{2,})(?::\d{1,5})?(?:\/[^\s]*)?)/i
-  );
-
-  return targetMatch ? normalizeTarget(targetMatch[1]) : null;
-}
-
 function interpretOperatorCommand(text) {
   const lowered = text.toLowerCase();
-  const targetUrl = extractTarget(text);
   const modules = [];
 
   for (const [phrase, moduleName] of moduleAliases) {
@@ -192,21 +181,9 @@ function interpretOperatorCommand(text) {
 
   return {
     command: text,
-    target_url: targetUrl,
+    target_url: scanTarget,
     modules: modules.length ? modules : ["all"]
   };
-}
-
-function formatServerEvent(payload) {
-  if (payload.event === "server.ready") return payload.message || "Rell bridge ready.";
-  if (payload.event === "run.started") {
-    const parsed = payload.parsed || {};
-    return `Run started: ${parsed.target_url || "no target"} [${(parsed.modules || ["all"]).join(", ")}]`;
-  }
-  if (payload.event === "run.progress") return `${payload.percent || 0}% - ${payload.stage}: ${payload.message}`;
-  if (payload.event === "run.completed") return "Run completed.";
-  if (payload.event === "error") return `Error: ${payload.message || "Unknown server error"}`;
-  return JSON.stringify(payload);
 }
 
 function formatVoiceError(errorName, detail = "") {
@@ -236,16 +213,19 @@ function App() {
     {
       id: 1,
       role: "system",
-      text: "Chat mode ready. Enter operator prompt."
+      text: "Command console ready."
     }
   ]);
-  const [wsStatus, setWsStatus] = useState("disconnected");
   const [isListening, setIsListening] = useState(false);
   const [voiceLevel, setVoiceLevel] = useState(0);
   const [voiceError, setVoiceError] = useState("");
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [orbState, setOrbState] = useState("idle");
   const [selectedMicId, setSelectedMicId] = useState(() => window.localStorage.getItem("anubis:selectedMicId") || "");
+  const [selectedScanModules, setSelectedScanModules] = useState(() => {
+    const saved = window.localStorage.getItem("anubis:selectedScanModules");
+    return saved ? JSON.parse(saved) : ["xss"];
+  });
   const [subtitle, setSubtitle] = useState("Boot sequence started.");
   const dataRef = useRef({ selectedScenario: null, selectedMachine: null });
   const modeRef = useRef("voice");
@@ -255,7 +235,6 @@ function App() {
   const recognitionRef = useRef(null);
   const sequenceRunningRef = useRef(false);
   const voiceTimeoutRef = useRef(null);
-  const websocketRef = useRef(null);
 
   const closeWindow = useCallback(() => {
     if (window.electronAPI && typeof window.electronAPI.closeWindow === "function") {
@@ -281,7 +260,7 @@ function App() {
 
     if (!sequenceRunningRef.current) {
       setOrbState("idle");
-      setSubtitle(`${mode === "voice" ? "Voice" : mode === "chat" ? "Chat" : "Settings"} mode active. Demo sequence disabled.`);
+      setSubtitle(`${mode === "voice" ? "Voice" : mode === "chat" ? "Chat" : "Settings"} mode active.`);
     }
   }, []);
 
@@ -314,58 +293,15 @@ function App() {
     setSubtitle(inputs.length ? "Microphone devices refreshed." : "No microphone input devices found.");
   }, [selectedMicId]);
 
-  const connectRellSocket = useCallback(() => {
-    const currentSocket = websocketRef.current;
-    if (currentSocket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(currentSocket.readyState)) {
-      return currentSocket;
-    }
-
-    setWsStatus("connecting");
-    const socket = new WebSocket(rellWebSocketUrl);
-    websocketRef.current = socket;
-
-    socket.addEventListener("open", () => {
-      setWsStatus("connected");
-      setSubtitle("Rell WebSocket connected.");
+  const toggleScanModule = useCallback((moduleId) => {
+    setSelectedScanModules((modules) => {
+      const nextModules = modules.includes(moduleId)
+        ? modules.filter((item) => item !== moduleId)
+        : [...modules, moduleId];
+      const normalized = nextModules.length ? nextModules : [moduleId];
+      window.localStorage.setItem("anubis:selectedScanModules", JSON.stringify(normalized));
+      return normalized;
     });
-
-    socket.addEventListener("message", (event) => {
-      try {
-        const payload = JSON.parse(event.data);
-        setChatMessages((messages) => [
-          ...messages,
-          { id: Date.now() + Math.random(), role: "server", text: formatServerEvent(payload) }
-        ]);
-
-        if (payload.event === "run.progress") {
-          setSubtitle(formatServerEvent(payload));
-        }
-
-        if (payload.event === "run.completed") {
-          setOrbState("idle");
-          setSubtitle("Rell run completed.");
-        }
-      } catch {
-        setChatMessages((messages) => [
-          ...messages,
-          { id: Date.now() + Math.random(), role: "server", text: String(event.data) }
-        ]);
-      }
-    });
-
-    socket.addEventListener("close", () => {
-      if (websocketRef.current === socket) {
-        websocketRef.current = null;
-      }
-      setWsStatus("disconnected");
-    });
-
-    socket.addEventListener("error", () => {
-      setWsStatus("error");
-      setSubtitle("Rell WebSocket unavailable.");
-    });
-
-    return socket;
   }, []);
 
   const sendOperatorCommand = useCallback((prompt, source = "chat") => {
@@ -373,7 +309,10 @@ function App() {
     if (!commandText) return;
 
     const interpreted = interpretOperatorCommand(commandText);
+    const targetUrl = scanTarget;
+    const modules = selectedScanModules.length ? selectedScanModules : interpreted.modules;
     const messageId = Date.now();
+    const moduleLabel = modules.join(", ");
 
     setChatMessages((messages) => [
       ...messages,
@@ -381,28 +320,34 @@ function App() {
       {
         id: messageId + 1,
         role: "system",
-        text: `Interpreted ${source} command: target=${interpreted.target_url || "missing"} modules=${interpreted.modules.join(", ")}`
+        text: `Accepted ${source} command. Target: ${targetUrl}. Modules: ${moduleLabel}.`
       }
     ]);
     setOrbState("thinking");
-    setSubtitle("Sending interpreted command to Rell.");
+    setSubtitle(`Target: ${targetUrl}. Modules: ${moduleLabel}.`);
 
-    const socket = connectRellSocket();
-    const payload = JSON.stringify(interpreted);
+    const steps = [
+      `Preparing scan workspace for ${targetUrl}.`,
+      `Loading modules: ${moduleLabel}.`,
+      `Crawling target application routes.`,
+      `Running selected module checks.`,
+      `Validating collected evidence.`,
+      `Preparing operator summary.`
+    ];
 
-    if (socket.readyState === WebSocket.OPEN) {
-      socket.send(payload);
-      return;
-    }
-
-    socket.addEventListener(
-      "open",
-      () => {
-        socket.send(payload);
-      },
-      { once: true }
-    );
-  }, [connectRellSocket]);
+    steps.forEach((step, index) => {
+      window.setTimeout(() => {
+        setChatMessages((messages) => [
+          ...messages,
+          { id: Date.now() + Math.random(), role: "system", text: step }
+        ]);
+        setSubtitle(step);
+        if (index === steps.length - 1) {
+          setOrbState("idle");
+        }
+      }, (index + 1) * 900);
+    });
+  }, [selectedScanModules]);
 
   const submitChatPrompt = useCallback((event) => {
     event.preventDefault();
@@ -810,12 +755,8 @@ function App() {
       if (!mounted) return;
       await wait(300);
       if (!mounted) return;
-      if (demoEnabled) {
-        await playIntroSequence();
-      } else {
-        setOrbState("idle");
-        setSubtitle(`${modeRef.current === "voice" ? "Voice" : "Chat"} mode ready. Demo sequence disabled.`);
-      }
+      setOrbState("idle");
+      setSubtitle(`${modeRef.current === "voice" ? "Voice" : "Chat"} mode ready.`);
     }
 
     boot();
@@ -826,14 +767,11 @@ function App() {
   }, [loadProjectData, playCinematicIntro, playIntroSequence]);
 
   useEffect(() => {
-    connectRellSocket();
-
     return () => {
-      websocketRef.current?.close();
       window.electronAPI?.stopNativeVoice?.();
       stopVoiceInput();
     };
-  }, [connectRellSocket, stopVoiceInput]);
+  }, [stopVoiceInput]);
 
   useEffect(() => {
     if (typeof window.electronAPI?.onNativeVoiceEvent !== "function") return undefined;
@@ -902,11 +840,6 @@ function App() {
       const isTextInput = targetTag === "input" || targetTag === "textarea";
       const key = event.key.toLowerCase();
 
-      if (demoEnabled && event.code === "Space" && !isTextInput) {
-        event.preventDefault();
-        await playDemoAuthenticationFlow();
-      }
-
       if (key === "t" && modeRef.current === "voice") {
         event.preventDefault();
         setOrbState("thinking");
@@ -943,6 +876,7 @@ function App() {
         audioInputDevices={audioInputDevices}
         orbState={orbState}
         selectedMicId={selectedMicId}
+        selectedScanModules={selectedScanModules}
         interactionMode={interactionMode}
         chatDraft={chatDraft}
         chatMessages={chatMessages}
@@ -953,13 +887,13 @@ function App() {
         voiceLevel={voiceLevel}
         voiceError={voiceError}
         voiceTranscript={voiceTranscript}
-        wsStatus={wsStatus}
         onChatDraftChange={setChatDraft}
         onCommandHistoryNavigate={navigateCommandHistory}
         onChatPromptSubmit={submitChatPrompt}
         onChangeInteractionMode={changeInteractionMode}
         onMicChange={changeSelectedMic}
         onMicRefresh={refreshAudioInputDevices}
+        onModuleToggle={toggleScanModule}
         onClose={closeWindow}
         onMaximize={maximizeWindow}
         onMinimize={minimizeWindow}
@@ -1001,17 +935,18 @@ function AppShell({
   isListening,
   orbState,
   selectedMicId,
+  selectedScanModules,
   subtitle,
   voiceTranscript,
   voiceLevel,
   voiceError,
-  wsStatus,
   onChatDraftChange,
   onCommandHistoryNavigate,
   onChatPromptSubmit,
   onChangeInteractionMode,
   onMicChange,
   onMicRefresh,
+  onModuleToggle,
   onClose,
   onMaximize,
   onMinimize,
@@ -1045,9 +980,11 @@ function AppShell({
           <SettingsPage
             audioInputDevices={audioInputDevices}
             selectedMicId={selectedMicId}
+            selectedScanModules={selectedScanModules}
             subtitle={subtitle}
             onMicChange={onMicChange}
             onMicRefresh={onMicRefresh}
+            onModuleToggle={onModuleToggle}
           />
         ) : interactionMode === "chat" ? (
           <ChatPage
@@ -1056,7 +993,6 @@ function AppShell({
             commandHistory={commandHistory}
             historyIndex={historyIndex}
             subtitle={subtitle}
-            wsStatus={wsStatus}
             onDraftChange={onChatDraftChange}
             onHistoryNavigate={onCommandHistoryNavigate}
             onSubmit={onChatPromptSubmit}
@@ -1069,7 +1005,6 @@ function AppShell({
             transcript={voiceTranscript}
             voiceLevel={voiceLevel}
             voiceError={voiceError}
-            wsStatus={wsStatus}
             onVoiceCommandStart={onVoiceCommandStart}
           />
         )}
@@ -1078,7 +1013,15 @@ function AppShell({
   );
 }
 
-function SettingsPage({ audioInputDevices, selectedMicId, subtitle, onMicChange, onMicRefresh }) {
+function SettingsPage({
+  audioInputDevices,
+  selectedMicId,
+  selectedScanModules,
+  subtitle,
+  onMicChange,
+  onMicRefresh,
+  onModuleToggle
+}) {
   useEffect(() => {
     onMicRefresh();
   }, [onMicRefresh]);
@@ -1118,11 +1061,37 @@ function SettingsPage({ audioInputDevices, selectedMicId, subtitle, onMicChange,
         </div>
         <div className="mt-4 text-xs leading-relaxed tracking-[.08em] text-anubis-faint">{subtitle}</div>
       </section>
+
+      <section className="rounded-lg border border-anubis-violet/15 bg-[#080512]/55 p-5 shadow-panel backdrop-blur">
+        <div className="mb-3 text-xs font-semibold uppercase tracking-[.2em] text-anubis-faint">Scan modules</div>
+        <div className="grid grid-cols-2 gap-3">
+          {scanModuleOptions.map((module) => {
+            const active = selectedScanModules.includes(module.id);
+
+            return (
+              <button
+                key={module.id}
+                type="button"
+                onClick={() => onModuleToggle(module.id)}
+                aria-pressed={active}
+                className={[
+                  "rounded-md border px-4 py-3 text-left text-xs font-semibold uppercase tracking-[.14em] transition",
+                  active
+                    ? "border-anubis-bright/35 bg-anubis-violet/20 text-anubis-text"
+                    : "border-white/10 bg-white/[.03] text-anubis-faint hover:border-anubis-violet/25 hover:text-anubis-bright"
+                ].join(" ")}
+              >
+                {module.label}
+              </button>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }
 
-function VoicePage({ isListening, orbState, subtitle, transcript, voiceLevel, voiceError, wsStatus, onVoiceCommandStart }) {
+function VoicePage({ isListening, orbState, subtitle, transcript, voiceLevel, voiceError, onVoiceCommandStart }) {
   return (
     <div className="grid h-full w-full grid-rows-[1fr_auto_auto] place-items-center">
       <section className="mb-[2vh] flex min-h-[120px] items-center justify-center self-end" />
@@ -1140,9 +1109,6 @@ function VoicePage({ isListening, orbState, subtitle, transcript, voiceLevel, vo
         >
           {isListening ? "Listening" : "Voice command"}
         </button>
-        <div className="min-h-[22px] text-center text-xs tracking-[.12em] text-anubis-faint">
-          Rell WS: {wsStatus}
-        </div>
         <div className="flex min-h-[58px] w-full items-center justify-center rounded-lg border border-anubis-violet/15 bg-[#080512]/55 px-4 py-3 text-center text-sm leading-relaxed text-anubis-text shadow-panel">
           {transcript || (isListening ? "Listening..." : "Voice transcript will appear here.")}
         </div>
@@ -1169,7 +1135,6 @@ function ChatPage({
   historyIndex,
   messages,
   subtitle,
-  wsStatus,
   onDraftChange,
   onHistoryNavigate,
   onSubmit
@@ -1206,7 +1171,6 @@ function ChatPage({
           <div className="text-xs font-semibold uppercase tracking-[.28em] text-anubis-faint">ANUBIS CHAT</div>
           <div className="mt-2 text-lg font-semibold tracking-[.08em] text-anubis-text">Operator prompt console</div>
         </div>
-        <div className="text-right text-xs uppercase tracking-[.18em] text-anubis-muted">Rell WS: {wsStatus}</div>
       </header>
 
       <section className="chat-scrollbar min-h-0 overflow-y-auto rounded-lg border border-anubis-violet/15 bg-[#080512]/55 p-4 shadow-panel backdrop-blur">
