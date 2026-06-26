@@ -280,6 +280,34 @@ function interpretOperatorCommand(text) {
   };
 }
 
+function getMicLabel(devices, deviceId) {
+  if (!deviceId) return "System default microphone";
+  const device = devices.find((item) => item.deviceId === deviceId);
+  if (device?.label) return device.label;
+  const index = devices.findIndex((item) => item.deviceId === deviceId);
+  return index >= 0 ? `Microphone ${index + 1}` : "Selected microphone";
+}
+
+async function acquireMicStream(selectedMicId) {
+  if (selectedMicId) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: { exact: selectedMicId } }
+      });
+    } catch {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: { deviceId: { ideal: selectedMicId } }
+        });
+      } catch {
+        // fall back to default device
+      }
+    }
+  }
+
+  return navigator.mediaDevices.getUserMedia({ audio: true });
+}
+
 function formatVoiceError(errorName, detail = "") {
   const reasons = {
     "not-allowed": "microphone permission blocked",
@@ -363,6 +391,11 @@ function App() {
   const authRetriesRef = useRef(0);
   const bootAbortRef = useRef(false);
   const skipIntroRef = useRef(false);
+  const awaitingAuthInputRef = useRef(false);
+  const bootPhaseRef = useRef("loading");
+  const bootCompleteRef = useRef(false);
+  const startVoiceCommandRef = useRef(null);
+  const handleAuthSubmitRef = useRef(null);
   const voiceTimeoutRef = useRef(null);
   const voiceMutedRef = useRef(voiceMuted);
   const voiceVolumeRef = useRef(voiceVolume);
@@ -380,6 +413,18 @@ function App() {
     voiceVolumeRef.current = voiceVolume;
     window.localStorage.setItem("anubis:voiceVolume", String(voiceVolume));
   }, [voiceVolume]);
+
+  useEffect(() => {
+    awaitingAuthInputRef.current = awaitingAuthInput;
+  }, [awaitingAuthInput]);
+
+  useEffect(() => {
+    bootPhaseRef.current = bootPhase;
+  }, [bootPhase]);
+
+  useEffect(() => {
+    bootCompleteRef.current = bootComplete;
+  }, [bootComplete]);
 
   const closeWindow = useCallback(() => {
     if (window.electronAPI && typeof window.electronAPI.closeWindow === "function") {
@@ -400,24 +445,30 @@ function App() {
   }, []);
 
   const changeInteractionMode = useCallback((mode) => {
-    if (!bootComplete && (mode === "reports" || mode === "settings")) {
+    const settingsAllowedDuringAuth = awaitingAuthInputRef.current && bootPhaseRef.current === "auth_waiting";
+
+    if (!bootComplete && mode === "reports") {
+      return;
+    }
+
+    if (!bootComplete && mode === "settings" && !settingsAllowedDuringAuth) {
       return;
     }
 
     modeRef.current = mode;
     setInteractionMode(mode);
 
-    if (!sequenceRunningRef.current && bootComplete) {
+    if (!sequenceRunningRef.current && (bootComplete || mode === "settings")) {
       setOrbState("idle");
       const label = mode === "voice" ? "Voice" : mode === "chat" ? "Chat" : mode === "reports" ? "Reports" : "Settings";
       setSubtitle(`${label} mode active.`);
     }
   }, [bootComplete]);
 
-  const refreshAudioInputDevices = useCallback(async () => {
+  const refreshAudioInputDevices = useCallback(async ({ updateSubtitle = true } = {}) => {
     if (!navigator.mediaDevices?.enumerateDevices) {
-      setSubtitle("Audio device enumeration unavailable.");
-      return;
+      if (updateSubtitle) setSubtitle("Audio device enumeration unavailable.");
+      return [];
     }
 
     try {
@@ -427,8 +478,8 @@ function App() {
       const message = formatVoiceError(error.name || "microphone", error.message);
       console.error(message, error);
       setVoiceError(message);
-      setSubtitle(message);
-      return;
+      if (updateSubtitle) setSubtitle(message);
+      return [];
     }
 
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -440,8 +491,18 @@ function App() {
       window.localStorage.setItem("anubis:selectedMicId", inputs[0].deviceId);
     }
 
-    setSubtitle(inputs.length ? "Microphone devices refreshed." : "No microphone input devices found.");
+    if (updateSubtitle) {
+      setSubtitle(inputs.length ? "Microphone devices refreshed." : "No microphone input devices found.");
+    }
+
+    return inputs;
   }, [selectedMicId]);
+
+  useEffect(() => {
+    if (appHidden) return undefined;
+    refreshAudioInputDevices({ updateSubtitle: false });
+    return undefined;
+  }, [appHidden, refreshAudioInputDevices]);
 
   const toggleScanModule = useCallback((moduleId) => {
     setSelectedScanModules((modules) => {
@@ -540,7 +601,7 @@ function App() {
 
   const handleAuthSubmit = useCallback(
     async (phrase, source = "chat") => {
-      if (!awaitingAuthInput || bootPhase !== "auth_waiting") return;
+      if (!awaitingAuthInputRef.current || bootPhaseRef.current !== "auth_waiting") return;
 
       const trimmed = phrase.trim();
       if (!trimmed) return;
@@ -590,6 +651,11 @@ function App() {
           sequenceRunningRef.current = false;
           setOrbState("thinking");
           setSubtitle(`Awaiting operator ${source === "voice" ? "voice" : "chat"} input.`);
+
+          if (source === "voice" || modeRef.current === "voice") {
+            await wait(900);
+            startVoiceCommandRef.current?.();
+          }
           return;
         }
 
@@ -598,6 +664,11 @@ function App() {
         sequenceRunningRef.current = false;
         setOrbState("thinking");
         setSubtitle(`Awaiting operator ${source === "voice" ? "voice" : "chat"} input.`);
+
+        if (modeRef.current === "voice") {
+          await wait(900);
+          startVoiceCommandRef.current?.();
+        }
         return;
       }
 
@@ -621,8 +692,12 @@ function App() {
       await runPostAuthSequence(scenario, machine);
       await completeBootFlow();
     },
-    [awaitingAuthInput, bootPhase, completeBootFlow, playDialogueStep, runPostAuthSequence]
+    [completeBootFlow, playDialogueStep, runPostAuthSequence]
   );
+
+  useEffect(() => {
+    handleAuthSubmitRef.current = handleAuthSubmit;
+  }, [handleAuthSubmit]);
 
   const sendOperatorCommand = useCallback(async (prompt, source = "chat") => {
     if (!bootComplete) return;
@@ -756,7 +831,7 @@ function App() {
     setVoiceLevel(0);
   }, []);
 
-  const armVoiceTimeout = useCallback(() => {
+  const armVoiceTimeout = useCallback((timeoutMs = 10000) => {
     if (voiceTimeoutRef.current) {
       clearTimeout(voiceTimeoutRef.current);
     }
@@ -768,15 +843,21 @@ function App() {
       window.electronAPI?.stopNativeVoice?.();
       stopVoiceInput(false);
       setOrbState("idle");
-    }, 10000);
+    }, timeoutMs);
   }, [stopVoiceInput]);
 
-  const changeSelectedMic = useCallback((deviceId) => {
-    stopVoiceInput();
-    setSelectedMicId(deviceId);
-    window.localStorage.setItem("anubis:selectedMicId", deviceId);
-    setSubtitle("Microphone input changed.");
-  }, [stopVoiceInput]);
+  const changeSelectedMic = useCallback(
+    (deviceId) => {
+      stopVoiceInput();
+      window.electronAPI?.stopNativeVoice?.();
+      setSelectedMicId(deviceId);
+      window.localStorage.setItem("anubis:selectedMicId", deviceId);
+      const label = getMicLabel(audioInputDevices, deviceId);
+      setSubtitle(`Microphone input changed: ${label}.`);
+      setVoiceError("");
+    },
+    [audioInputDevices, stopVoiceInput]
+  );
 
   const startAudioMeter = useCallback((stream) => {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -804,23 +885,25 @@ function App() {
   const startVoiceCommand = useCallback(async () => {
     if (isListening || recognitionRef.current) {
       stopVoiceInput();
-      if (hasNativeVoice()) {
-        window.electronAPI.stopNativeVoice();
-      }
+      window.electronAPI?.stopNativeVoice?.();
       return;
     }
 
-    const authCapture = awaitingAuthInput && bootPhase === "auth_waiting";
+    const authCapture =
+      awaitingAuthInputRef.current && bootPhaseRef.current === "auth_waiting";
+    const recordDurationMs = authCapture ? 8000 : 6000;
+    const listenTimeoutMs = authCapture ? 25000 : 12000;
 
     let stream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: selectedMicId ? { deviceId: { exact: selectedMicId } } : true
-      });
+      stream = await acquireMicStream(selectedMicId);
     } catch {
       setSubtitle("Microphone permission denied or unavailable.");
+      setVoiceError("Microphone permission denied or unavailable.");
       return;
     }
+
+    const activeMicLabel = getMicLabel(audioInputDevices, selectedMicId);
 
     micStreamRef.current = stream;
     startAudioMeter(stream);
@@ -831,20 +914,20 @@ function App() {
     setOrbState("thinking");
     setSubtitle(
       authCapture
-        ? "Listening for operator authentication phrase."
-        : "Listening for operator command."
+        ? `Listening on ${activeMicLabel}. Speak your authentication phrase.`
+        : `Listening on ${activeMicLabel}. Speak your command.`
     );
-    armVoiceTimeout();
+    armVoiceTimeout(listenTimeoutMs);
 
     if (hasNativeVoice()) {
-      setSubtitle("Recording selected microphone for 6 seconds.");
+      setSubtitle(`Recording ${recordDurationMs / 1000}s from ${activeMicLabel}...`);
       try {
-        const wavBuffer = await recordWavFromStream(stream, 6000);
+        const wavBuffer = await recordWavFromStream(stream, recordDurationMs);
         if (voiceTimeoutRef.current) {
           clearTimeout(voiceTimeoutRef.current);
           voiceTimeoutRef.current = null;
         }
-        setSubtitle("Transcribing selected microphone recording.");
+        setSubtitle(`Transcribing audio from ${activeMicLabel}.`);
         const result = await window.electronAPI.transcribeNativeVoice(wavBuffer);
         const transcriptPayload = result.payloads?.find((payload) => payload.type === "result");
         const errorPayload = result.payloads?.find((payload) => payload.type === "error");
@@ -854,12 +937,12 @@ function App() {
           setVoiceTranscript(text);
           setSubtitle(`Understood: ${text}`);
           if (authCapture) {
-            await handleAuthSubmit(text, "voice");
+            await handleAuthSubmitRef.current?.(text, "voice");
           } else {
             sendOperatorCommand(text, "voice");
           }
         } else {
-          const message = `Native voice failed: ${errorPayload?.message || result.stderr || "no speech captured from selected microphone"}.`;
+          const message = `Voice capture failed on ${activeMicLabel}: ${errorPayload?.message || result.stderr || "no speech detected"}. Try Settings to pick another microphone.`;
           setVoiceError(message);
           setSubtitle(message);
           setChatMessages((messages) => [
@@ -868,12 +951,14 @@ function App() {
           ]);
         }
       } catch (error) {
-        const message = `Native voice failed: ${error.message || "selected microphone recording failed"}.`;
+        const message = `Voice capture failed on ${activeMicLabel}: ${error.message || "recording failed"}.`;
         setVoiceError(message);
         setSubtitle(message);
       } finally {
         stopVoiceInput(false);
-        setOrbState("idle");
+        if (!sequenceRunningRef.current) {
+          setOrbState("idle");
+        }
       }
       return;
     }
@@ -919,7 +1004,7 @@ function App() {
         }
         setSubtitle(`Understood: ${finalTranscript.trim()}`);
         if (authCapture) {
-          handleAuthSubmit(finalTranscript.trim(), "voice");
+          handleAuthSubmitRef.current?.(finalTranscript.trim(), "voice");
         } else {
           sendOperatorCommand(finalTranscript.trim(), "voice");
         }
@@ -947,17 +1032,11 @@ function App() {
     };
 
     recognition.start();
-  }, [
-    armVoiceTimeout,
-    awaitingAuthInput,
-    bootPhase,
-    handleAuthSubmit,
-    isListening,
-    selectedMicId,
-    sendOperatorCommand,
-    startAudioMeter,
-    stopVoiceInput
-  ]);
+  }, [armVoiceTimeout, audioInputDevices, isListening, selectedMicId, sendOperatorCommand, startAudioMeter, stopVoiceInput]);
+
+  useEffect(() => {
+    startVoiceCommandRef.current = startVoiceCommand;
+  }, [startVoiceCommand]);
 
   const loadProjectData = useCallback(async () => {
     try {
@@ -1054,7 +1133,7 @@ function App() {
         role: "system",
         text:
           modeRef.current === "voice"
-            ? "Enter your assigned voice phrase using the Voice command button, or switch to Chat mode."
+            ? "Speak your assigned voice phrase now, press Voice command / Ctrl+A, or switch to Chat mode."
             : "Enter your assigned authentication phrase in the chat prompt below."
       }
     ]);
@@ -1105,6 +1184,18 @@ function App() {
   }, [awaitingAuthInput, bootPhase, interactionMode]);
 
   useEffect(() => {
+    if (!awaitingAuthInput || bootPhase !== "auth_waiting" || interactionMode !== "voice") return undefined;
+
+    const timer = window.setTimeout(() => {
+      if (!awaitingAuthInputRef.current || bootPhaseRef.current !== "auth_waiting") return;
+      if (isListening || recognitionRef.current) return;
+      startVoiceCommandRef.current?.();
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [awaitingAuthInput, bootPhase, interactionMode, isListening]);
+
+  useEffect(() => {
     let mounted = true;
 
     async function boot() {
@@ -1136,7 +1227,11 @@ function App() {
         const text = payload.text || "";
         setVoiceTranscript(text);
         if (text.trim()) {
-          setSubtitle(`Hearing: ${text.trim()}`);
+          setSubtitle(
+            awaitingAuthInputRef.current
+              ? `Hearing authentication phrase: ${text.trim()}`
+              : `Hearing: ${text.trim()}`
+          );
           armVoiceTimeout();
         }
         return;
@@ -1151,9 +1246,9 @@ function App() {
             voiceTimeoutRef.current = null;
           }
           setSubtitle(`Understood: ${text.trim()}`);
-          if (awaitingAuthInput && bootPhase === "auth_waiting") {
-            handleAuthSubmit(text.trim(), "voice");
-          } else if (bootComplete) {
+          if (awaitingAuthInputRef.current && bootPhaseRef.current === "auth_waiting") {
+            handleAuthSubmitRef.current?.(text.trim(), "voice");
+          } else if (bootCompleteRef.current) {
             sendOperatorCommand(text.trim(), "voice");
           }
         }
@@ -1165,7 +1260,11 @@ function App() {
       if (payload.type === "listening" || payload.type === "starting") {
         setIsListening(true);
         setVoiceError("");
-        setSubtitle("Windows speech recognizer listening.");
+        setSubtitle(
+          awaitingAuthInputRef.current
+            ? "Windows speech recognizer listening for authentication phrase."
+            : "Windows speech recognizer listening."
+        );
         armVoiceTimeout();
         return;
       }
@@ -1191,7 +1290,7 @@ function App() {
         }
       }
     });
-  }, [armVoiceTimeout, awaitingAuthInput, bootComplete, bootPhase, handleAuthSubmit, sendOperatorCommand, stopVoiceInput]);
+  }, [armVoiceTimeout, sendOperatorCommand, stopVoiceInput]);
 
   useEffect(() => {
     const onKeyDown = async (event) => {
@@ -1370,7 +1469,12 @@ function AppShell({
         </WindowControlButton>
       </div>
 
-      <ModeToggle mode={interactionMode} bootComplete={bootComplete} onChange={onChangeInteractionMode} />
+      <ModeToggle
+        mode={interactionMode}
+        bootComplete={bootComplete}
+        awaitingAuthInput={awaitingAuthInput}
+        onChange={onChangeInteractionMode}
+      />
 
       <BackgroundLayer />
 
@@ -1403,6 +1507,8 @@ function AppShell({
           />
         ) : (
           <VoicePage
+            audioInputDevices={audioInputDevices}
+            selectedMicId={selectedMicId}
             isListening={isListening}
             orbState={orbState}
             subtitle={subtitle}
@@ -1414,6 +1520,8 @@ function AppShell({
             awaitingAuthInput={awaitingAuthInput}
             bootComplete={bootComplete}
             authenticatedMember={authenticatedMember}
+            onMicChange={onMicChange}
+            onMicRefresh={onMicRefresh}
             onVoiceMuteToggle={onVoiceMuteToggle}
             onVoiceVolumeChange={onVoiceVolumeChange}
             onVoiceCommandStart={onVoiceCommandStart}
@@ -1535,6 +1643,8 @@ function SettingsPage({
 }
 
 function VoicePage({
+  audioInputDevices,
+  selectedMicId,
   isListening,
   orbState,
   subtitle,
@@ -1546,15 +1656,52 @@ function VoicePage({
   awaitingAuthInput,
   bootComplete,
   authenticatedMember,
+  onMicChange,
+  onMicRefresh,
   onVoiceCommandStart,
   onVoiceMuteToggle,
   onVoiceVolumeChange
 }) {
+  const activeMicLabel = getMicLabel(audioInputDevices, selectedMicId);
+  const showMicWarning = isListening && voiceLevel < 3;
+
   return (
     <div className="grid h-full w-full grid-rows-[1fr_auto_auto] place-items-center">
       <section className="mb-[2vh] flex min-h-[120px] items-center justify-center self-end" />
       <Orb state={orbState} />
       <div className="mt-1 flex w-[min(640px,90vw)] flex-col items-center gap-3">
+        <section className="w-full rounded-lg border border-anubis-violet/15 bg-[#080512]/55 p-3 shadow-panel backdrop-blur">
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-[.18em] text-anubis-faint">
+            Active microphone
+          </div>
+          <div className="flex gap-2">
+            <select
+              value={selectedMicId}
+              onChange={(event) => onMicChange(event.target.value)}
+              className="h-10 flex-1 rounded-md border border-white/10 bg-[#05030c]/90 px-3 text-xs text-anubis-text outline-none focus:border-anubis-bright/45 focus:ring-2 focus:ring-anubis-violet/20"
+            >
+              {audioInputDevices.length ? (
+                audioInputDevices.map((device, index) => (
+                  <option key={device.deviceId} value={device.deviceId}>
+                    {device.label || `Microphone ${index + 1}`}
+                  </option>
+                ))
+              ) : (
+                <option value="">No microphone detected</option>
+              )}
+            </select>
+            <button
+              type="button"
+              onClick={() => onMicRefresh()}
+              className="min-w-[92px] rounded-md border border-anubis-bright/25 bg-anubis-violet/20 px-3 text-[10px] font-semibold uppercase tracking-[.14em] text-anubis-text transition hover:bg-anubis-violet/30 hover:text-white"
+            >
+              Refresh
+            </button>
+          </div>
+          <div className="mt-2 text-[11px] leading-relaxed tracking-[.06em] text-anubis-faint">
+            Voice input uses: <span className="text-anubis-text">{activeMicLabel}</span>
+          </div>
+        </section>
         <div className="flex flex-wrap items-center justify-center gap-3">
           <button
             type="button"
@@ -1623,6 +1770,11 @@ function VoicePage({
         {voiceError ? (
           <div className="max-w-full rounded-md border border-red-300/20 bg-red-500/10 px-3 py-2 text-center text-xs leading-relaxed text-red-100">
             {voiceError}
+          </div>
+        ) : null}
+        {showMicWarning ? (
+          <div className="max-w-full rounded-md border border-yellow-300/20 bg-yellow-500/10 px-3 py-2 text-center text-xs leading-relaxed text-yellow-100">
+            No audio detected on {activeMicLabel}. Choose another microphone above or check Windows sound settings.
           </div>
         ) : null}
         <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
@@ -1851,12 +2003,14 @@ function ReportMetric({ label, value }) {
   );
 }
 
-function ModeToggle({ mode, bootComplete, onChange }) {
+function ModeToggle({ mode, bootComplete, awaitingAuthInput, onChange }) {
   return (
     <div className="absolute left-7 top-[22px] z-[9999] flex rounded-full border border-anubis-violet/20 bg-[#120a23]/30 p-1 backdrop-blur">
       {["voice", "chat", "reports", "settings"].map((item) => {
         const active = mode === item;
-        const locked = !bootComplete && (item === "reports" || item === "settings");
+        const locked =
+          (!bootComplete && item === "reports") ||
+          (!bootComplete && item === "settings" && !awaitingAuthInput);
 
         return (
           <button
