@@ -1,22 +1,21 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Mic, Volume2, VolumeX } from "lucide-react";
+import {
+  BOOT_NARRATION,
+  getAuthFailureStep,
+  getAuthPromptSteps,
+  getAuthSuccessStep,
+  getHandoffStep,
+  getPostAuthSteps,
+  getReadyStep,
+  getVerificationStep,
+  INTRO_WORDS
+} from "./lib/bootDialogue.js";
+import { loadProjectRegistry } from "./lib/dataLoader.js";
+import { matchMemberPhrase } from "./lib/memberAuth.js";
+import { resolveDefaultMachine, resolveScenarioForMember } from "./lib/registry.js";
 import "./styles.css";
-
-const introWords = ["WELCOME", "TO", "ANUBIS"];
-
-const introMessages = [
-  { state: "speaking", text: "WELCOME TO ANUBIS.", delay: 2200 },
-  { state: "thinking", text: "Loading scenario registry and target systems.", delay: 2200 },
-  { state: "speaking", text: "I am ANUBIS.", delay: 1800 },
-  { state: "speaking", text: "System standby. Awaiting operator authentication.", delay: 2200 },
-  { state: "idle", text: "ANUBIS is online.", delay: 1500 }
-];
-
-const dataPathCandidates = {
-  machines: ["../../data/machines.json", "/data/machines.json", "../data/machines.json"],
-  scenarios: ["../../data/scenarios.json", "/data/scenarios.json", "../data/scenarios.json"]
-};
 
 const scanTarget = "shopnest.com";
 const scanModuleOptions = [
@@ -170,26 +169,6 @@ function buildScanReport({ modules, targetUrl }) {
     warnings: [],
     timestamp: new Date().toISOString()
   };
-}
-
-async function loadJsonFile(paths) {
-  let lastError;
-
-  for (const path of paths) {
-    try {
-      const response = await fetch(path);
-      if (response.ok) return response.json();
-      lastError = new Error(`Failed to load ${path} - ${response.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError;
-}
-
-function pickFirstActive(items) {
-  return items.find((item) => item.active) || null;
 }
 
 function getSpeechRecognition() {
@@ -362,13 +341,28 @@ function App() {
   });
   const [latestReport, setLatestReport] = useState(null);
   const [subtitle, setSubtitle] = useState("Boot sequence started.");
-  const dataRef = useRef({ selectedScenario: null, selectedMachine: null });
+  const [bootComplete, setBootComplete] = useState(false);
+  const [bootPhase, setBootPhase] = useState("loading");
+  const [awaitingAuthInput, setAwaitingAuthInput] = useState(false);
+  const [authenticatedMember, setAuthenticatedMember] = useState(null);
+  const dataRef = useRef({
+    members: [],
+    scenarios: [],
+    machines: [],
+    appConfig: {},
+    selectedScenario: null,
+    selectedMachine: null,
+    authenticatedMember: null
+  });
   const modeRef = useRef("voice");
   const audioContextRef = useRef(null);
   const analyserFrameRef = useRef(null);
   const micStreamRef = useRef(null);
   const recognitionRef = useRef(null);
   const sequenceRunningRef = useRef(false);
+  const authRetriesRef = useRef(0);
+  const bootAbortRef = useRef(false);
+  const skipIntroRef = useRef(false);
   const voiceTimeoutRef = useRef(null);
   const voiceMutedRef = useRef(voiceMuted);
   const voiceVolumeRef = useRef(voiceVolume);
@@ -406,15 +400,19 @@ function App() {
   }, []);
 
   const changeInteractionMode = useCallback((mode) => {
+    if (!bootComplete && (mode === "reports" || mode === "settings")) {
+      return;
+    }
+
     modeRef.current = mode;
     setInteractionMode(mode);
 
-    if (!sequenceRunningRef.current) {
+    if (!sequenceRunningRef.current && bootComplete) {
       setOrbState("idle");
       const label = mode === "voice" ? "Voice" : mode === "chat" ? "Chat" : mode === "reports" ? "Reports" : "Settings";
       setSubtitle(`${label} mode active.`);
     }
-  }, []);
+  }, [bootComplete]);
 
   const refreshAudioInputDevices = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) {
@@ -496,7 +494,139 @@ function App() {
     window.speechSynthesis.speak(utterance);
   }, []);
 
+  const playDialogueStep = useCallback(
+    async (step, { speak = false } = {}) => {
+      if (bootAbortRef.current) return;
+
+      setOrbState(step.state || "idle");
+      setSubtitle(step.text);
+
+      if (speak && modeRef.current === "voice") {
+        speakVoiceStep(step.text, step.state === "speaking" ? "speaking" : step.state || "thinking");
+      }
+
+      await wait(step.delay || 1800);
+    },
+    [speakVoiceStep]
+  );
+
+  const completeBootFlow = useCallback(async () => {
+    await playDialogueStep(getHandoffStep(modeRef.current));
+    await playDialogueStep(getReadyStep(modeRef.current));
+
+    setBootComplete(true);
+    setBootPhase("complete");
+    setAwaitingAuthInput(false);
+    sequenceRunningRef.current = false;
+    setOrbState("idle");
+    setChatMessages((messages) => [
+      ...messages,
+      {
+        id: Date.now(),
+        role: "system",
+        text: "Authentication and boot sequence complete. Command console ready."
+      }
+    ]);
+  }, [playDialogueStep]);
+
+  const runPostAuthSequence = useCallback(
+    async (scenario, machine) => {
+      for (const step of getPostAuthSteps(scenario, machine)) {
+        await playDialogueStep(step, { speak: modeRef.current === "voice" });
+      }
+    },
+    [playDialogueStep]
+  );
+
+  const handleAuthSubmit = useCallback(
+    async (phrase, source = "chat") => {
+      if (!awaitingAuthInput || bootPhase !== "auth_waiting") return;
+
+      const trimmed = phrase.trim();
+      if (!trimmed) return;
+
+      setAwaitingAuthInput(false);
+      setBootPhase("auth_verifying");
+      sequenceRunningRef.current = true;
+
+      setChatMessages((messages) => [
+        ...messages,
+        { id: Date.now(), role: "operator", text: trimmed },
+        { id: Date.now() + 1, role: "system", text: "Verifying operator identity signature.", active: true }
+      ]);
+
+      await playDialogueStep(getVerificationStep(source), { speak: source === "voice" });
+
+      const { members, scenarios, machines, appConfig } = dataRef.current;
+      const phraseRequired = appConfig?.authentication?.phraseRequired !== false;
+      const fuzzy = appConfig?.voice?.fuzzyRecognition !== false;
+      const retryLimit = Number(appConfig?.voice?.retryLimit) || 2;
+      const welcomeByName = appConfig?.authentication?.welcomeMemberByName !== false;
+
+      let member = null;
+      if (phraseRequired) {
+        member = matchMemberPhrase(trimmed, members, { fuzzy });
+      }
+
+      if (phraseRequired && !member) {
+        authRetriesRef.current += 1;
+
+        await playDialogueStep(getAuthFailureStep(), { speak: source === "voice" });
+
+        setChatMessages((messages) =>
+          messages.map((message) => (message.active ? { ...message, active: false } : message)).concat({
+            id: Date.now() + 2,
+            role: "system",
+            text:
+              authRetriesRef.current < retryLimit
+                ? `Authentication failed. Retry ${authRetriesRef.current} of ${retryLimit}.`
+                : "Maximum authentication retries reached. Please contact the demo operator."
+          })
+        );
+
+        if (authRetriesRef.current < retryLimit) {
+          setBootPhase("auth_waiting");
+          setAwaitingAuthInput(true);
+          sequenceRunningRef.current = false;
+          setOrbState("thinking");
+          setSubtitle(`Awaiting operator ${source === "voice" ? "voice" : "chat"} input.`);
+          return;
+        }
+
+        setBootPhase("auth_waiting");
+        setAwaitingAuthInput(true);
+        sequenceRunningRef.current = false;
+        setOrbState("thinking");
+        setSubtitle(`Awaiting operator ${source === "voice" ? "voice" : "chat"} input.`);
+        return;
+      }
+
+      const resolvedMember = member || { fullName: "Operator" };
+      dataRef.current.authenticatedMember = resolvedMember;
+      setAuthenticatedMember(resolvedMember);
+
+      if (welcomeByName) {
+        await playDialogueStep(getAuthSuccessStep(resolvedMember.fullName), { speak: source === "voice" });
+      }
+
+      const scenario = resolveScenarioForMember(resolvedMember, scenarios);
+      const machine = resolveDefaultMachine(machines, appConfig);
+      dataRef.current.selectedScenario = scenario;
+      dataRef.current.selectedMachine = machine;
+
+      setChatMessages((messages) =>
+        messages.map((message) => (message.active ? { ...message, active: false } : message))
+      );
+
+      await runPostAuthSequence(scenario, machine);
+      await completeBootFlow();
+    },
+    [awaitingAuthInput, bootPhase, completeBootFlow, playDialogueStep, runPostAuthSequence]
+  );
+
   const sendOperatorCommand = useCallback(async (prompt, source = "chat") => {
+    if (!bootComplete) return;
+
     const commandText = prompt.trim();
     if (!commandText) return;
 
@@ -567,19 +697,28 @@ function App() {
     if (source !== "voice" || voiceMutedRef.current || !window.speechSynthesis) {
       setOrbState("idle");
     }
-  }, [scanDelayRange.max, scanDelayRange.min, selectedScanModules, speakVoiceStep]);
+  }, [bootComplete, scanDelayRange.max, scanDelayRange.min, selectedScanModules, speakVoiceStep]);
 
-  const submitChatPrompt = useCallback((event) => {
-    event.preventDefault();
+  const submitChatPrompt = useCallback(
+    (event) => {
+      event.preventDefault();
 
-    const prompt = chatDraft.trim();
-    if (!prompt) return;
+      const prompt = chatDraft.trim();
+      if (!prompt) return;
 
-    sendOperatorCommand(prompt, "chat");
-    setCommandHistory((history) => [prompt, ...history.filter((item) => item !== prompt)].slice(0, 30));
-    setHistoryIndex(-1);
-    setChatDraft("");
-  }, [chatDraft, sendOperatorCommand]);
+      if (awaitingAuthInput) {
+        handleAuthSubmit(prompt, "chat");
+        setChatDraft("");
+        return;
+      }
+
+      sendOperatorCommand(prompt, "chat");
+      setCommandHistory((history) => [prompt, ...history.filter((item) => item !== prompt)].slice(0, 30));
+      setHistoryIndex(-1);
+      setChatDraft("");
+    },
+    [awaitingAuthInput, chatDraft, handleAuthSubmit, sendOperatorCommand]
+  );
 
   const navigateCommandHistory = useCallback((direction) => {
     if (!commandHistory.length) return;
@@ -671,6 +810,8 @@ function App() {
       return;
     }
 
+    const authCapture = awaitingAuthInput && bootPhase === "auth_waiting";
+
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -688,7 +829,11 @@ function App() {
     setVoiceError("");
     setVoiceTranscript("");
     setOrbState("thinking");
-    setSubtitle("Listening for operator command.");
+    setSubtitle(
+      authCapture
+        ? "Listening for operator authentication phrase."
+        : "Listening for operator command."
+    );
     armVoiceTimeout();
 
     if (hasNativeVoice()) {
@@ -708,7 +853,11 @@ function App() {
           const text = transcriptPayload.text.trim();
           setVoiceTranscript(text);
           setSubtitle(`Understood: ${text}`);
-          sendOperatorCommand(text, "voice");
+          if (authCapture) {
+            await handleAuthSubmit(text, "voice");
+          } else {
+            sendOperatorCommand(text, "voice");
+          }
         } else {
           const message = `Native voice failed: ${errorPayload?.message || result.stderr || "no speech captured from selected microphone"}.`;
           setVoiceError(message);
@@ -769,7 +918,11 @@ function App() {
           voiceTimeoutRef.current = null;
         }
         setSubtitle(`Understood: ${finalTranscript.trim()}`);
-        sendOperatorCommand(finalTranscript.trim(), "voice");
+        if (authCapture) {
+          handleAuthSubmit(finalTranscript.trim(), "voice");
+        } else {
+          sendOperatorCommand(finalTranscript.trim(), "voice");
+        }
       }
     };
 
@@ -794,31 +947,35 @@ function App() {
     };
 
     recognition.start();
-  }, [armVoiceTimeout, isListening, selectedMicId, sendOperatorCommand, startAudioMeter, stopVoiceInput]);
+  }, [
+    armVoiceTimeout,
+    awaitingAuthInput,
+    bootPhase,
+    handleAuthSubmit,
+    isListening,
+    selectedMicId,
+    sendOperatorCommand,
+    startAudioMeter,
+    stopVoiceInput
+  ]);
 
   const loadProjectData = useCallback(async () => {
     try {
-      const [machinesData, scenariosData] = await Promise.all([
-        loadJsonFile(dataPathCandidates.machines),
-        loadJsonFile(dataPathCandidates.scenarios)
-      ]);
-
-      const machines = Array.isArray(machinesData.machines)
-        ? machinesData.machines.filter((item) => item.active)
-        : [];
-      const scenarios = Array.isArray(scenariosData.scenarios)
-        ? scenariosData.scenarios.filter((item) => item.active)
-        : [];
+      const registry = await loadProjectRegistry();
+      const scenario = resolveScenarioForMember(null, registry.scenarios);
+      const machine = resolveDefaultMachine(registry.machines, registry.appConfig);
 
       dataRef.current = {
-        selectedScenario: pickFirstActive(scenarios),
-        selectedMachine: pickFirstActive(machines)
+        members: registry.members,
+        scenarios: registry.scenarios,
+        machines: registry.machines,
+        appConfig: registry.appConfig,
+        selectedScenario: scenario,
+        selectedMachine: machine,
+        authenticatedMember: null
       };
 
-      console.log("Machines loaded:", machines);
-      console.log("Scenarios loaded:", scenarios);
-      console.log("Selected scenario:", dataRef.current.selectedScenario);
-      console.log("Selected machine:", dataRef.current.selectedMachine);
+      console.log("Registry loaded:", dataRef.current);
     } catch (error) {
       console.error("Data loading error:", error);
       setSubtitle("Warning: failed to load ANUBIS data registry.");
@@ -826,6 +983,8 @@ function App() {
   }, []);
 
   const playCinematicWord = useCallback(async (word, hold = 1000) => {
+    if (skipIntroRef.current) return;
+
     setIntroWordPhase("");
     setIntroWord(word);
     await wait(20);
@@ -839,152 +998,127 @@ function App() {
     setIntroActive(true);
     setIntroFading(false);
     setAppHidden(true);
+    skipIntroRef.current = false;
 
-    await wait(400);
+    const delayBeforeStart = Number(dataRef.current.appConfig?.intro?.delayBeforeStartMs) || 400;
+    await wait(delayBeforeStart);
 
-    for (const word of introWords) {
+    if (skipIntroRef.current) {
+      setIntroActive(false);
+      setIntroFading(false);
+      setAppHidden(false);
+      return;
+    }
+
+    for (const word of INTRO_WORDS) {
+      if (skipIntroRef.current) break;
       await playCinematicWord(word, 1100);
       await wait(180);
     }
 
     setIntroFading(true);
-    await wait(900);
+    await wait(skipIntroRef.current ? 0 : 900);
 
     setIntroActive(false);
     setIntroFading(false);
     setAppHidden(false);
   }, [playCinematicWord]);
 
-  const playIntroSequence = useCallback(async () => {
-    if (sequenceRunningRef.current) return;
-    sequenceRunningRef.current = true;
+  const startAuthenticationPhase = useCallback(async () => {
+    const appConfig = dataRef.current.appConfig || {};
+    const authEnabled = appConfig.authentication?.enabled !== false;
 
-    for (const step of introMessages) {
-      setOrbState(step.state);
-      setSubtitle(step.text);
-      await wait(step.delay);
+    if (!authEnabled) {
+      const scenario = dataRef.current.selectedScenario;
+      const machine = dataRef.current.selectedMachine;
+      await runPostAuthSequence(scenario, machine);
+      await completeBootFlow();
+      return;
     }
 
-    const { selectedScenario, selectedMachine } = dataRef.current;
-
-    if (selectedScenario) {
-      setOrbState("speaking");
-      setSubtitle(`Scenario registry online: ${selectedScenario.displayName} [${selectedScenario.shortCode}].`);
-      await wait(2300);
-
-      setOrbState("thinking");
-      setSubtitle(`Category: ${selectedScenario.category}. Severity: ${selectedScenario.severity}.`);
-      await wait(2200);
-
-      setOrbState("speaking");
-      setSubtitle(`Scenario owner assigned: ${selectedScenario.defaultOwner}.`);
-      await wait(2200);
+    setBootPhase("auth_prompt");
+    for (const step of getAuthPromptSteps(modeRef.current)) {
+      await playDialogueStep(step, { speak: modeRef.current === "voice" });
     }
 
-    if (selectedMachine) {
-      setOrbState("speaking");
-      setSubtitle(`Target registry online: ${selectedMachine.displayName} [${selectedMachine.shortCode}].`);
-      await wait(2300);
-
-      setOrbState("thinking");
-      setSubtitle(`Environment: ${selectedMachine.environment}. Platform: ${selectedMachine.platform}.`);
-      await wait(2200);
-    }
-
-    setOrbState("idle");
-    setSubtitle(`${modeRef.current === "voice" ? "Voice" : "Chat"} mode ready.`);
+    setBootPhase("auth_waiting");
+    setAwaitingAuthInput(true);
     sequenceRunningRef.current = false;
-  }, []);
-
-  const playAuthenticationFlow = useCallback(async () => {
-    if (sequenceRunningRef.current) return;
-    sequenceRunningRef.current = true;
-
-    setOrbState("speaking");
-    setSubtitle("Operator authentication sequence initiated.");
-    await wait(2200);
-
-    setOrbState("speaking");
-    setSubtitle(
-      modeRef.current === "voice"
-        ? "Please identify yourself using your assigned voice phrase."
-        : "Please identify yourself using the chat authentication prompt."
-    );
-    await wait(2400);
-
     setOrbState("thinking");
     setSubtitle(`Awaiting operator ${modeRef.current === "voice" ? "voice" : "chat"} input.`);
-    await wait(1800);
 
-    setOrbState("speaking");
-    setSubtitle(`${modeRef.current === "voice" ? "Voice" : "Chat"} identity pattern received. Verifying operator signature.`);
-    await wait(2400);
+    setChatMessages((messages) => [
+      ...messages,
+      {
+        id: Date.now(),
+        role: "system",
+        text:
+          modeRef.current === "voice"
+            ? "Enter your assigned voice phrase using the Voice command button, or switch to Chat mode."
+            : "Enter your assigned authentication phrase in the chat prompt below."
+      }
+    ]);
+  }, [completeBootFlow, playDialogueStep, runPostAuthSequence]);
 
-    setOrbState("speaking");
-    setSubtitle("Authentication successful. Welcome, Hassan Hesham.");
-    await wait(2400);
+  const runFullBootSequence = useCallback(async () => {
+    if (sequenceRunningRef.current) return;
+    sequenceRunningRef.current = true;
+    bootAbortRef.current = false;
+    authRetriesRef.current = 0;
 
-    const { selectedScenario, selectedMachine } = dataRef.current;
-
-    if (selectedScenario) {
-      setOrbState("speaking");
-      setSubtitle(`Scenario received. ${selectedScenario.voiceName} selected.`);
-      await wait(2400);
-
-      setOrbState("thinking");
-      setSubtitle(`Scenario code ${selectedScenario.shortCode}. Assigned owner: ${selectedScenario.defaultOwner}.`);
-      await wait(2400);
-    } else {
-      setOrbState("speaking");
-      setSubtitle("No active scenario available.");
-      await wait(2200);
-    }
-
-    if (selectedMachine) {
-      setOrbState("speaking");
-      setSubtitle(`Target received. ${selectedMachine.voiceName} selected.`);
-      await wait(2400);
-
-      setOrbState("thinking");
-      setSubtitle(`Target environment: ${selectedMachine.environment}. Severity profile: ${selectedMachine.severity}.`);
-      await wait(2400);
-    } else {
-      setOrbState("speaking");
-      setSubtitle("No active target machine available.");
-      await wait(2200);
-    }
-
-    setOrbState("speaking");
-    setSubtitle("Preparing execution flow. Please stand by.");
-    await wait(2400);
-
+    setBootPhase("loading");
+    setBootComplete(false);
+    setAwaitingAuthInput(false);
+    setAuthenticatedMember(null);
     setOrbState("idle");
-    setSubtitle(`Sequence complete. Awaiting ${modeRef.current === "voice" ? "voice" : "chat"} authentication.`);
-    sequenceRunningRef.current = false;
-  }, []);
+    setSubtitle("Boot sequence started.");
+
+    await loadProjectData();
+    if (bootAbortRef.current) return;
+
+    const appConfig = dataRef.current.appConfig || {};
+    const introEnabled = appConfig.intro?.enabled !== false;
+    const autoPlayIntro = appConfig.intro?.autoPlayOnLaunch !== false;
+
+    if (introEnabled && autoPlayIntro) {
+      setBootPhase("cinematic_words");
+      await playCinematicIntro();
+    } else {
+      setAppHidden(false);
+    }
+
+    if (bootAbortRef.current) return;
+
+    setBootPhase("boot_narration");
+    for (const step of BOOT_NARRATION) {
+      await playDialogueStep(step, { speak: modeRef.current === "voice" });
+    }
+
+    if (bootAbortRef.current) return;
+
+    await startAuthenticationPhase();
+  }, [loadProjectData, playCinematicIntro, playDialogueStep, startAuthenticationPhase]);
+
+  useEffect(() => {
+    if (!awaitingAuthInput || bootPhase !== "auth_waiting") return;
+    setSubtitle(`Awaiting operator ${interactionMode === "voice" ? "voice" : "chat"} input.`);
+  }, [awaitingAuthInput, bootPhase, interactionMode]);
 
   useEffect(() => {
     let mounted = true;
 
     async function boot() {
-      setOrbState("idle");
-      setSubtitle("Boot sequence started.");
-      await loadProjectData();
       if (!mounted) return;
-      await playCinematicIntro();
-      if (!mounted) return;
-      await wait(300);
-      if (!mounted) return;
-      setOrbState("idle");
-      setSubtitle(`${modeRef.current === "voice" ? "Voice" : "Chat"} mode ready.`);
+      await runFullBootSequence();
     }
 
     boot();
 
     return () => {
       mounted = false;
+      bootAbortRef.current = true;
     };
-  }, [loadProjectData, playCinematicIntro, playIntroSequence]);
+  }, [runFullBootSequence]);
 
   useEffect(() => {
     return () => {
@@ -1017,7 +1151,11 @@ function App() {
             voiceTimeoutRef.current = null;
           }
           setSubtitle(`Understood: ${text.trim()}`);
-          sendOperatorCommand(text.trim(), "voice");
+          if (awaitingAuthInput && bootPhase === "auth_waiting") {
+            handleAuthSubmit(text.trim(), "voice");
+          } else if (bootComplete) {
+            sendOperatorCommand(text.trim(), "voice");
+          }
         }
         window.electronAPI?.stopNativeVoice?.();
         stopVoiceInput(false);
@@ -1053,13 +1191,25 @@ function App() {
         }
       }
     });
-  }, [armVoiceTimeout, sendOperatorCommand, stopVoiceInput]);
+  }, [armVoiceTimeout, awaitingAuthInput, bootComplete, bootPhase, handleAuthSubmit, sendOperatorCommand, stopVoiceInput]);
 
   useEffect(() => {
     const onKeyDown = async (event) => {
       const targetTag = event.target?.tagName?.toLowerCase();
       const isTextInput = targetTag === "input" || targetTag === "textarea";
       const key = event.key.toLowerCase();
+      const shortcutsEnabled = dataRef.current.appConfig?.testing?.keyboardShortcutsEnabled !== false;
+
+      if (!shortcutsEnabled) return;
+
+      if (event.ctrlKey && event.shiftKey && key === "i" && introActive) {
+        event.preventDefault();
+        skipIntroRef.current = true;
+        setIntroActive(false);
+        setIntroFading(false);
+        setAppHidden(false);
+        return;
+      }
 
       if (event.ctrlKey && key === "a" && !isTextInput) {
         event.preventDefault();
@@ -1069,19 +1219,19 @@ function App() {
         return;
       }
 
-      if (key === "t" && modeRef.current === "voice") {
+      if (key === "t" && modeRef.current === "voice" && bootComplete) {
         event.preventDefault();
         setOrbState("thinking");
         setSubtitle("Manual thinking state activated.");
       }
 
-      if (key === "s" && modeRef.current === "voice") {
+      if (key === "s" && modeRef.current === "voice" && bootComplete) {
         event.preventDefault();
         setOrbState("speaking");
         setSubtitle("Manual speaking state activated.");
       }
 
-      if (key === "d" && modeRef.current === "voice") {
+      if (key === "d" && modeRef.current === "voice" && bootComplete) {
         event.preventDefault();
         setOrbState("idle");
         setSubtitle("Manual idle state activated.");
@@ -1095,13 +1245,16 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeWindow, playAuthenticationFlow, playCinematicIntro, playIntroSequence, startVoiceCommand]);
+  }, [bootComplete, closeWindow, introActive, startVoiceCommand]);
 
   return (
     <>
       <CinematicIntro active={introActive} fading={introFading} word={introWord} phase={introWordPhase} />
       <AppShell
         hidden={appHidden}
+        bootComplete={bootComplete}
+        awaitingAuthInput={awaitingAuthInput}
+        authenticatedMember={authenticatedMember}
         audioInputDevices={audioInputDevices}
         orbState={orbState}
         selectedMicId={selectedMicId}
@@ -1162,6 +1315,9 @@ function CinematicIntro({ active, fading, word, phase }) {
 
 function AppShell({
   hidden,
+  bootComplete,
+  awaitingAuthInput,
+  authenticatedMember,
   audioInputDevices,
   chatDraft,
   chatMessages,
@@ -1214,7 +1370,7 @@ function AppShell({
         </WindowControlButton>
       </div>
 
-      <ModeToggle mode={interactionMode} onChange={onChangeInteractionMode} />
+      <ModeToggle mode={interactionMode} bootComplete={bootComplete} onChange={onChangeInteractionMode} />
 
       <BackgroundLayer />
 
@@ -1240,6 +1396,7 @@ function AppShell({
             commandHistory={commandHistory}
             historyIndex={historyIndex}
             subtitle={subtitle}
+            awaitingAuthInput={awaitingAuthInput}
             onDraftChange={onChatDraftChange}
             onHistoryNavigate={onCommandHistoryNavigate}
             onSubmit={onChatPromptSubmit}
@@ -1254,6 +1411,9 @@ function AppShell({
             voiceError={voiceError}
             voiceMuted={voiceMuted}
             voiceVolume={voiceVolume}
+            awaitingAuthInput={awaitingAuthInput}
+            bootComplete={bootComplete}
+            authenticatedMember={authenticatedMember}
             onVoiceMuteToggle={onVoiceMuteToggle}
             onVoiceVolumeChange={onVoiceVolumeChange}
             onVoiceCommandStart={onVoiceCommandStart}
@@ -1383,6 +1543,9 @@ function VoicePage({
   voiceError,
   voiceMuted,
   voiceVolume,
+  awaitingAuthInput,
+  bootComplete,
+  authenticatedMember,
   onVoiceCommandStart,
   onVoiceMuteToggle,
   onVoiceVolumeChange
@@ -1404,7 +1567,7 @@ function VoicePage({
             ].join(" ")}
           >
             <Mic className="mr-2 h-4 w-4" aria-hidden="true" />
-            {isListening ? "Listening" : "Voice command"}
+            {isListening ? "Listening" : awaitingAuthInput ? "Auth phrase" : "Voice command"}
           </button>
           <div className="group relative">
             <button
@@ -1441,8 +1604,22 @@ function VoicePage({
           </div>
         </div>
         <div className="flex min-h-[58px] w-full items-center justify-center rounded-lg border border-anubis-violet/15 bg-[#080512]/55 px-4 py-3 text-center text-sm leading-relaxed text-anubis-text shadow-panel">
-          {transcript || (isListening ? "Listening..." : "Awaiting voice command.")}
+          {transcript ||
+            (isListening
+              ? awaitingAuthInput
+                ? "Listening for authentication phrase..."
+                : "Listening..."
+              : awaitingAuthInput
+                ? "Awaiting operator authentication phrase."
+                : bootComplete
+                  ? "Awaiting voice command."
+                  : "Boot sequence in progress.")}
         </div>
+        {authenticatedMember ? (
+          <div className="text-center text-xs uppercase tracking-[.16em] text-anubis-faint">
+            Operator: {authenticatedMember.fullName}
+          </div>
+        ) : null}
         {voiceError ? (
           <div className="max-w-full rounded-md border border-red-300/20 bg-red-500/10 px-3 py-2 text-center text-xs leading-relaxed text-red-100">
             {voiceError}
@@ -1466,6 +1643,7 @@ function ChatPage({
   historyIndex,
   messages,
   subtitle,
+  awaitingAuthInput,
   onDraftChange,
   onHistoryNavigate,
   onSubmit
@@ -1537,7 +1715,7 @@ function ChatPage({
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
             onKeyDown={handlePromptKeyDown}
-            placeholder="Enter prompt or text..."
+            placeholder={awaitingAuthInput ? "Enter your assigned authentication phrase..." : "Enter prompt or text..."}
             rows={2}
             className="min-h-[52px] flex-1 resize-none rounded-md border border-white/10 bg-[#05030c]/80 px-4 py-2 text-sm leading-relaxed text-anubis-text outline-none transition placeholder:text-anubis-faint focus:border-anubis-bright/45 focus:ring-2 focus:ring-anubis-violet/20"
           />
@@ -1545,7 +1723,7 @@ function ChatPage({
             type="submit"
             className="min-w-[116px] rounded-md border border-anubis-bright/25 bg-anubis-violet/20 px-5 text-xs font-semibold uppercase tracking-[.2em] text-anubis-text transition hover:bg-anubis-violet/30 hover:text-white"
           >
-            Send
+            {awaitingAuthInput ? "Authenticate" : "Send"}
           </button>
         </div>
         <div className="mt-3 flex items-center justify-between gap-3 text-xs tracking-[.12em] text-anubis-faint">
@@ -1673,20 +1851,25 @@ function ReportMetric({ label, value }) {
   );
 }
 
-function ModeToggle({ mode, onChange }) {
+function ModeToggle({ mode, bootComplete, onChange }) {
   return (
     <div className="absolute left-7 top-[22px] z-[9999] flex rounded-full border border-anubis-violet/20 bg-[#120a23]/30 p-1 backdrop-blur">
       {["voice", "chat", "reports", "settings"].map((item) => {
         const active = mode === item;
+        const locked = !bootComplete && (item === "reports" || item === "settings");
 
         return (
           <button
             key={item}
             type="button"
             onClick={() => onChange(item)}
+            disabled={locked}
             aria-pressed={active}
+            aria-disabled={locked}
+            title={locked ? "Complete authentication to unlock this mode." : item}
             className={[
               "h-9 min-w-[82px] rounded-full px-4 text-xs font-semibold uppercase tracking-[.18em] transition",
+              locked ? "cursor-not-allowed opacity-35" : "",
               active
                 ? "bg-anubis-violet/25 text-anubis-text shadow-[0_0_18px_rgba(155,108,255,.16)]"
                 : "text-anubis-faint hover:bg-anubis-violet/10 hover:text-anubis-bright"
