@@ -1,34 +1,33 @@
 export const INTRO_WORDS = ["WELCOME", "TO", "ANUBIS"];
 
 export const BOOT_NARRATION = [
-  { state: "speaking", text: "WELCOME TO ANUBIS.", delay: 2200 },
-  { state: "thinking", text: "Loading scenario registry and target systems.", delay: 2200 },
-  { state: "speaking", text: "I am ANUBIS.", delay: 1800 },
-  { state: "speaking", text: "System standby. Awaiting operator authentication.", delay: 2200 },
-  { state: "idle", text: "ANUBIS is online.", delay: 1500 }
+  { state: "speaking", text: "Hi, I'm ANUBIS.", delay: 1800 }
 ];
 
 export function getAuthPromptSteps(mode) {
   const inputLabel = mode === "voice" ? "voice" : "chat";
 
   return [
-    { state: "speaking", text: "Operator authentication sequence initiated.", delay: 2200 },
+    { state: "speaking", text: "Operator authentication required.", delay: 1800 },
     {
       state: "speaking",
       text:
         mode === "voice"
-          ? "Please identify yourself using your assigned voice phrase."
+          ? "Press your assigned operator key."
           : "Please identify yourself using the chat authentication prompt.",
-      delay: 2400
+      delay: 1800
     },
-    { state: "thinking", text: `Awaiting operator ${inputLabel} input.`, delay: 1200 }
+    { state: "thinking", text: `Awaiting operator ${inputLabel} input.`, delay: 900 }
   ];
 }
 
 export function getVerificationStep(mode) {
   return {
     state: "speaking",
-    text: `${mode === "voice" ? "Voice" : "Chat"} identity pattern received. Verifying operator signature.`,
+    text:
+      mode === "keybind"
+        ? "Operator key received. Verifying operator identity."
+        : `${mode === "voice" ? "Voice" : "Chat"} identity pattern received. Verifying operator signature.`,
     delay: 2400
   };
 }

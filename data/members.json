@@ -13,10 +13,10 @@
     },
     {
       "id": "member-2",
-      "fullName": "Marcelino",
-      "displayPhrase": "Marcelino one point two",
-      "phraseCode": "MARCELINO1.2",
-      "normalizedPhrase": "marcelino one point two",
+      "fullName": "Marceleno",
+      "displayPhrase": "Marceleno one point two",
+      "phraseCode": "MARCELENO1.2",
+      "normalizedPhrase": "marceleno one point two",
       "number": "1.2",
       "role": "coding",
       "primaryScenario": "CODING",
@@ -130,6 +130,39 @@
       "number": "1.12",
       "role": "scenario-owner",
       "primaryScenario": "WebSocket",
+      "active": true
+    },
+    {
+      "id": "member-13",
+      "fullName": "Mariem",
+      "displayPhrase": "Mariem",
+      "phraseCode": "MARIEM",
+      "normalizedPhrase": "mariem",
+      "number": "1.13",
+      "role": "auth-operator",
+      "primaryScenario": "CODING",
+      "active": true
+    },
+    {
+      "id": "member-14",
+      "fullName": "Afaf",
+      "displayPhrase": "Afaf",
+      "phraseCode": "AFAF",
+      "normalizedPhrase": "afaf",
+      "number": "1.14",
+      "role": "auth-operator",
+      "primaryScenario": "CODING",
+      "active": true
+    },
+    {
+      "id": "member-15",
+      "fullName": "Hasaneen",
+      "displayPhrase": "Hasaneen",
+      "phraseCode": "HASANEEN",
+      "normalizedPhrase": "hasaneen",
+      "number": "1.15",
+      "role": "auth-operator",
+      "primaryScenario": "CODING",
       "active": true
     }
   ]

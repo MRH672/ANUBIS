@@ -51,6 +51,23 @@ const digitAttackProfiles = {
   "0": { memberName: "Ahmed Taher", moduleId: "websocket", vulnerability: "WebSocket Analysis" }
 };
 
+const authOperatorKeys = {
+  q: "Marceleno",
+  w: "Aya",
+  e: "Alyaa",
+  r: "Farha",
+  t: "Mohamed",
+  y: "Nouran",
+  u: "Nourhan",
+  i: "Ali",
+  o: "Ziad Ashraf",
+  p: "Ziad Ashish",
+  m: "Mariem",
+  a: "Afaf",
+  h: "Hasaneen",
+  s: "Ahmed"
+};
+
 const moduleAliases = [
   ["stored xss", "stored-xss"],
   ["stored cross site scripting", "stored-xss"],
@@ -1662,6 +1679,21 @@ function App() {
       }
 
       if (modeRef.current !== "voice") return;
+
+      const authOperator = authOperatorKeys[key];
+      if (
+        authOperator &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        !isTextInput &&
+        awaitingAuthInputRef.current &&
+        bootPhaseRef.current === "auth_waiting"
+      ) {
+        event.preventDefault();
+        await handleAuthSubmit(authOperator, "keybind");
+        return;
+      }
 
       if (
         event.key === "ArrowUp" &&
