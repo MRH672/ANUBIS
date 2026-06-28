@@ -18,7 +18,7 @@ Welcome, Hassan Hesham.
 2. Website
 
 ANUBIS:
-What website should I simulate?
+What website should I attack?
 
 OPERATOR:
 shopnest.com
@@ -34,7 +34,7 @@ SQL Injection, Reflected XSS.
 
 ANUBIS:
 Modules accepted.
-Preparing simulation.
+Preparing attack.
 
 Demo keybind
 

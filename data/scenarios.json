@@ -21,7 +21,7 @@
       "category": "Injection",
       "severity": "Critical",
       "description": "Tests unsafe operating system command execution paths.",
-      "defaultOwner": "Alia",
+      "defaultOwner": "Alyaa",
       "active": true
     },
     {

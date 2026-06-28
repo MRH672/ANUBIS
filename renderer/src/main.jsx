@@ -27,16 +27,29 @@ const projectIntroductionSentences = [
 
 const scanModuleOptions = [
   { id: "sqli", label: "SQL Injection" },
-  { id: "osci", label: "Command Injection" },
+  { id: "osci", label: "OS Command Injection" },
   { id: "reflected-xss", label: "Reflected XSS" },
   { id: "stored-xss", label: "Stored XSS" },
   { id: "information", label: "Information Disclosure" },
-  { id: "xml", label: "XXE" },
+  { id: "xml", label: "XXE Injection" },
   { id: "path", label: "Path Traversal" },
   { id: "access", label: "Access Control" },
   { id: "smuggling", label: "HTTP Request Smuggling" },
-  { id: "websocket", label: "WebSocket" }
+  { id: "websocket", label: "WebSocket Analysis" }
 ];
+
+const digitAttackProfiles = {
+  "1": { memberName: "Aya Magid", moduleId: "sqli", vulnerability: "SQL Injection" },
+  "2": { memberName: "Alyaa", moduleId: "osci", vulnerability: "OS Command Injection" },
+  "3": { memberName: "Farha Elsayed", moduleId: "reflected-xss", vulnerability: "Reflected XSS" },
+  "4": { memberName: "Mohamed Reda", moduleId: "stored-xss", vulnerability: "Stored XSS" },
+  "5": { memberName: "Nouran Mohamed", moduleId: "information", vulnerability: "Information Disclosure" },
+  "6": { memberName: "Nourhan Mohamed", moduleId: "xml", vulnerability: "XXE Injection" },
+  "7": { memberName: "Ali Mohamed", moduleId: "path", vulnerability: "Path Traversal" },
+  "8": { memberName: "Ziad Ashraf", moduleId: "access", vulnerability: "Access Control" },
+  "9": { memberName: "Ziad Ashish", moduleId: "smuggling", vulnerability: "HTTP Request Smuggling" },
+  "0": { memberName: "Ahmed Taher", moduleId: "websocket", vulnerability: "WebSocket Analysis" }
+};
 
 const moduleAliases = [
   ["stored xss", "stored-xss"],
@@ -189,7 +202,7 @@ function buildFinding(moduleId, targetUrl) {
       matched_at: `https://${targetUrl}/`,
       type: "http-request-smuggling",
       evidence: {
-        response: "Front-end and back-end request boundary interpretation differed during simulation."
+        response: "Front-end and back-end request boundary interpretation differed during the attack run."
       }
     }
   };
@@ -205,14 +218,18 @@ function buildFinding(moduleId, targetUrl) {
   };
 }
 
-function buildScanReport({ modules, targetUrl }) {
+function buildScanReport({ modules, targetUrl, memberName = "" }) {
   const uniqueModules = modules.includes("all") ? scanModuleOptions.map((module) => module.id) : modules;
 
   return {
     target: targetUrl,
+    assigned_member: memberName,
     captured_request_count: 24 + uniqueModules.length * 7,
     modules: uniqueModules.map((moduleId) => getModuleLabel(moduleId)),
-    confirmed_findings: uniqueModules.map((moduleId) => buildFinding(moduleId, targetUrl)),
+    confirmed_findings: uniqueModules.map((moduleId) => ({
+      ...buildFinding(moduleId, targetUrl),
+      assigned_member: memberName
+    })),
     warnings: [],
     timestamp: new Date().toISOString()
   };
@@ -467,6 +484,7 @@ function App() {
   const awaitingAuthInputRef = useRef(false);
   const awaitingWebsiteInputRef = useRef(false);
   const awaitingModulesInputRef = useRef(false);
+  const pendingAttackProfileRef = useRef(null);
   const bootPhaseRef = useRef("loading");
   const bootCompleteRef = useRef(false);
   const startVoiceCommandRef = useRef(null);
@@ -689,17 +707,17 @@ function App() {
     setAwaitingWebsiteInput(true);
     sequenceRunningRef.current = false;
     setOrbState("thinking");
-    setSubtitle("Authentication complete. What website should I simulate?");
+    setSubtitle("Authentication complete. What website should I attack?");
     setChatMessages((messages) => [
       ...messages.map((message) => (message.active ? { ...message, active: false } : message)),
       {
         id: Date.now(),
         role: "system",
-        text: "Authentication complete. Enter the website to simulate, or press Ctrl+Space."
+        text: "Authentication complete. Enter the website to attack, or press Ctrl+Space."
       }
     ]);
     if (isNarrationEnabled()) {
-      void speakNarration("Authentication complete. What website should I simulate?", "thinking");
+      void speakNarration("Authentication complete. What website should I attack?", "thinking");
     }
   }, [isNarrationEnabled, speakNarration]);
 
@@ -714,6 +732,9 @@ function App() {
     setAwaitingWebsiteInput(false);
     setAwaitingModulesInput(false);
     setSelectedTarget("");
+    awaitingWebsiteInputRef.current = false;
+    awaitingModulesInputRef.current = false;
+    pendingAttackProfileRef.current = null;
     sequenceRunningRef.current = false;
     modeRef.current = "voice";
     setInteractionMode("voice");
@@ -836,43 +857,53 @@ function App() {
     handleAuthSubmitRef.current = handleAuthSubmit;
   }, [handleAuthSubmit]);
 
-  const executeScan = useCallback(async ({ commandText, targetUrl, modules, source = "chat" }) => {
+  const executeScan = useCallback(async ({
+    commandText,
+    targetUrl,
+    modules,
+    source = "chat",
+    memberName = ""
+  }) => {
     const messageId = Date.now();
     const moduleLabels = modules.map(getModuleLabel);
     const moduleLabel = moduleLabels.join(", ");
     const stepIdBase = messageId + 100;
 
-    setChatMessages((messages) => [
-      ...messages,
-      { id: messageId, role: "operator", text: commandText },
-      {
-        id: messageId + 1,
-        role: "system",
-        text: `Accepted ${source} command. Target: ${targetUrl}. Modules: ${moduleLabel}.`,
-        active: true
-      }
-    ]);
+    if (source === "chat") {
+      setChatMessages((messages) => [
+        ...messages,
+        { id: messageId, role: "operator", text: commandText },
+        {
+          id: messageId + 1,
+          role: "system",
+          text: `Attack accepted. Website: ${targetUrl}. Modules: ${moduleLabel}.`,
+          active: true
+        }
+      ]);
+    }
     setOrbState("thinking");
-    setSubtitle(`Target: ${targetUrl}. Modules: ${moduleLabel}.`);
+    setSubtitle(`Attack target: ${targetUrl}. Modules: ${moduleLabel}.`);
     if (source === "voice") {
-      setVoiceTranscript(`Test ${moduleLabel} on ${targetUrl}.`);
+      setVoiceTranscript(`Attack ${targetUrl} using ${moduleLabel}.`);
     }
 
     const steps = [
-      `Preparing scan workspace for ${targetUrl}.`,
-      `Loading modules: ${moduleLabel}.`,
-      `Crawling target application routes for ${targetUrl}.`,
-      ...moduleLabels.map((label) => `Test ${label} on ${targetUrl}.`),
-      `Validating collected evidence for ${targetUrl}.`,
-      `Preparing operator summary for ${targetUrl}.`
+      `Preparing attack workspace for ${targetUrl}.`,
+      `Loading attack modules: ${moduleLabel}.`,
+      `Mapping application routes for ${targetUrl}.`,
+      ...moduleLabels.map((label) => `Attacking ${targetUrl} with ${label}.`),
+      `Validating attack evidence for ${targetUrl}.`,
+      `Preparing security report for ${targetUrl}.`
     ];
 
     for (const [index, step] of steps.entries()) {
       const activeId = stepIdBase + index;
-      setChatMessages((messages) => [
-        ...messages,
-        { id: activeId, role: "system", text: step, active: true }
-      ]);
+      if (source === "chat") {
+        setChatMessages((messages) => [
+          ...messages,
+          { id: activeId, role: "system", text: step, active: true }
+        ]);
+      }
       setSubtitle(step);
       if (isNarrationEnabled()) {
         await speakNarration(step, "thinking");
@@ -880,15 +911,19 @@ function App() {
       } else {
         await wait(randomDelay(scanDelayRange.min, scanDelayRange.max));
       }
-      setChatMessages((messages) =>
-        messages.map((message) => (message.id === activeId ? { ...message, active: false } : message))
-      );
+      if (source === "chat") {
+        setChatMessages((messages) =>
+          messages.map((message) => (message.id === activeId ? { ...message, active: false } : message))
+        );
+      }
     }
 
-    setChatMessages((messages) =>
-      messages.map((message) => (message.id === messageId + 1 ? { ...message, active: false } : message))
-    );
-    const report = buildScanReport({ modules, targetUrl });
+    if (source === "chat") {
+      setChatMessages((messages) =>
+        messages.map((message) => (message.id === messageId + 1 ? { ...message, active: false } : message))
+      );
+    }
+    const report = buildScanReport({ modules, targetUrl, memberName });
     setLatestReport(report);
     modeRef.current = "reports";
     setInteractionMode("reports");
@@ -896,16 +931,18 @@ function App() {
     if (isNarrationEnabled()) {
       await speakNarration(`Report ready for ${targetUrl}.`, "idle");
     }
-    setChatMessages((messages) => [
-      ...messages,
-      { id: Date.now() + Math.random(), role: "system", text: `Report ready for ${targetUrl}.` }
-    ]);
+    if (source === "chat") {
+      setChatMessages((messages) => [
+        ...messages,
+        { id: Date.now() + Math.random(), role: "system", text: `Report ready for ${targetUrl}.` }
+      ]);
+    }
     if (!isNarrationEnabled()) {
       setOrbState("idle");
     }
   }, [isNarrationEnabled, scanDelayRange.max, scanDelayRange.min, speakNarration]);
 
-  const handleWebsiteSubmit = useCallback((website, source = "chat") => {
+  const handleWebsiteSubmit = useCallback(async (website, source = "chat") => {
     if (!awaitingWebsiteInputRef.current || bootPhaseRef.current !== "website_waiting") return;
 
     const targetUrl = normalizeTargetInput(website);
@@ -914,25 +951,57 @@ function App() {
       return;
     }
 
+    const attackProfile = pendingAttackProfileRef.current;
+
     setSelectedTarget(targetUrl);
     setAwaitingWebsiteInput(false);
+    awaitingWebsiteInputRef.current = false;
+
+    if (attackProfile) {
+      setAwaitingModulesInput(false);
+      setBootComplete(true);
+      setBootPhase("attacking");
+      sequenceRunningRef.current = true;
+
+      const announcement = `Attack on ${targetUrl} using ${attackProfile.vulnerability} is starting.`;
+      setSubtitle(announcement);
+      if (isNarrationEnabled()) {
+        await speakNarration(announcement, "thinking");
+      }
+
+      await executeScan({
+        commandText: `Attack ${targetUrl} using ${attackProfile.vulnerability}`,
+        targetUrl,
+        modules: [attackProfile.moduleId],
+        source,
+        memberName: attackProfile.memberName
+      });
+
+      pendingAttackProfileRef.current = null;
+      sequenceRunningRef.current = false;
+      setBootPhase("function_ready");
+      return;
+    }
+
     setAwaitingModulesInput(true);
     setBootPhase("modules_waiting");
     setOrbState("thinking");
     setSubtitle(`Target accepted: ${targetUrl}. What modules should I run?`);
-    setChatMessages((messages) => [
-      ...messages,
-      { id: Date.now(), role: "operator", text: website.trim() },
-      {
-        id: Date.now() + 1,
-        role: "system",
-        text: `Target accepted: ${targetUrl}. Enter modules such as SQL, stored XSS, XXE, or all. Ctrl+Space uses selected Settings modules.`
-      }
-    ]);
+    if (source === "chat") {
+      setChatMessages((messages) => [
+        ...messages,
+        { id: Date.now(), role: "operator", text: website.trim() },
+        {
+          id: Date.now() + 1,
+          role: "system",
+          text: `Target accepted: ${targetUrl}. Enter modules such as SQL, stored XSS, XXE, or all.`
+        }
+      ]);
+    }
     if (isNarrationEnabled()) {
       void speakNarration(`Target accepted. What modules should I run?`, "thinking");
     }
-  }, [isNarrationEnabled, speakNarration]);
+  }, [executeScan, isNarrationEnabled, speakNarration]);
 
   const handleModulesSubmit = useCallback(async (moduleText, source = "chat") => {
     if (!awaitingModulesInputRef.current || bootPhaseRef.current !== "modules_waiting") return;
@@ -1588,6 +1657,35 @@ function App() {
         return;
       }
 
+      const attackProfile = digitAttackProfiles[event.key];
+      if (
+        attackProfile &&
+        !isTextInput &&
+        bootPhaseRef.current === "function_ready" &&
+        dataRef.current.authenticatedMember
+      ) {
+        event.preventDefault();
+        stopSpeech();
+        pendingAttackProfileRef.current = attackProfile;
+        bootPhaseRef.current = "website_waiting";
+        awaitingWebsiteInputRef.current = true;
+        setBootComplete(false);
+        setBootPhase("website_waiting");
+        setAwaitingWebsiteInput(true);
+        setAwaitingModulesInput(false);
+        setSelectedTarget("");
+
+        const prompt = `${attackProfile.vulnerability}, assigned to ${attackProfile.memberName}. What website should I attack?`;
+        setOrbState("speaking");
+        setSubtitle(prompt);
+        if (isNarrationEnabled()) {
+          await speakNarration(prompt, "thinking");
+        } else {
+          setOrbState("thinking");
+        }
+        return;
+      }
+
       if (event.ctrlKey && event.code === "Space") {
         event.preventDefault();
         const demoConfig = dataRef.current.appConfig?.testing || {};
@@ -1602,7 +1700,7 @@ function App() {
         }
 
         if (awaitingWebsiteInputRef.current) {
-          handleWebsiteSubmit(demoConfig.demoWebsite || defaultScanTarget, "keybind");
+          await handleWebsiteSubmit(demoConfig.demoWebsite || defaultScanTarget, "keybind");
           return;
         }
 
@@ -2214,7 +2312,7 @@ function ReportsPage({ report }) {
       <header className="flex items-end justify-between border-b border-anubis-violet/15 pb-4">
         <div>
           <div className="text-xs font-semibold uppercase tracking-[.28em] text-anubis-faint">ANUBIS REPORTS</div>
-          <div className="mt-2 text-lg font-semibold tracking-[.08em] text-anubis-text">Final scan report</div>
+          <div className="mt-2 text-lg font-semibold tracking-[.08em] text-anubis-text">Final attack report</div>
         </div>
         {report ? (
           <div className="text-right text-xs uppercase tracking-[.16em] text-anubis-faint">{formatReportTime(report.timestamp)}</div>
@@ -2223,8 +2321,9 @@ function ReportsPage({ report }) {
 
       {report ? (
         <>
-          <section className="grid grid-cols-4 gap-3">
+          <section className="grid grid-cols-5 gap-3">
             <ReportMetric label="Target" value={report.target} />
+            <ReportMetric label="Assigned member" value={report.assigned_member || "General"} />
             <ReportMetric label="Requests" value={report.captured_request_count} />
             <ReportMetric label="Findings" value={findings.length} />
             <ReportMetric label="Modules" value={report.modules?.join(", ") || "None"} />
@@ -2239,7 +2338,7 @@ function ReportsPage({ report }) {
                       <div>
                         <div className="text-base font-semibold tracking-[.04em] text-anubis-text">{finding.name}</div>
                         <div className="mt-1 text-xs uppercase tracking-[.14em] text-anubis-faint">
-                          {finding.type} / {finding.matched_at}
+                          {finding.type} / {finding.assigned_member || "General"} / {finding.matched_at}
                         </div>
                       </div>
                       <SeverityBadge severity={finding.severity} />
