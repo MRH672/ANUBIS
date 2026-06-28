@@ -1216,6 +1216,26 @@ function App() {
     startVoiceCommandRef.current = startVoiceCommand;
   }, [startVoiceCommand]);
 
+  const handleVoicePrimaryAction = useCallback(() => {
+    if (authenticatedMember && bootComplete && !sequenceRunningRef.current) {
+      window.electronAPI?.stopNativeVoice?.();
+      stopVoiceInput();
+      stopSpeech();
+      setBootComplete(false);
+      setAwaitingAuthInput(false);
+      setAwaitingModulesInput(false);
+      setSelectedTarget("");
+      setVoiceTranscript("");
+      setVoiceError("");
+      modeRef.current = "voice";
+      setInteractionMode("voice");
+      beginWebsiteSelection();
+      return;
+    }
+
+    startVoiceCommand();
+  }, [authenticatedMember, beginWebsiteSelection, bootComplete, startVoiceCommand, stopVoiceInput]);
+
   const loadProjectData = useCallback(async () => {
     try {
       const registry = await loadProjectRegistry();
@@ -1590,7 +1610,7 @@ function App() {
         onClose={closeWindow}
         onMaximize={maximizeWindow}
         onMinimize={minimizeWindow}
-        onVoiceCommandStart={startVoiceCommand}
+        onVoiceCommandStart={handleVoicePrimaryAction}
       />
     </>
   );
@@ -1893,7 +1913,9 @@ function VoicePage({
                   ? "Website"
                   : awaitingModulesInput
                     ? "Modules"
-                    : "Voice command"}
+                    : authenticatedMember && bootComplete
+                      ? "Start again"
+                      : "Voice command"}
           </button>
           <div className="group relative">
             <button
