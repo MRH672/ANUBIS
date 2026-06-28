@@ -108,20 +108,18 @@ function runPowerShellStt(args) {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    minWidth: 1280,
-    minHeight: 720,
-    frame: false,
-    transparent: false,
-    backgroundColor: "#02040b",
-    fullscreen: false,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      devTools: isDebug,
-      preload: path.join(__dirname, "preload.js")
-    }
+    width: 1920,
+  height: 1080,
+  fullscreen: true,
+  frame: false,
+  transparent: false,
+  backgroundColor: "#02040b",
+  webPreferences: {
+    nodeIntegration: false,
+    contextIsolation: true,
+    devTools: isDebug,
+    preload: path.join(__dirname, "preload.js")
+      }
   });
 
   const filePath = path.join(__dirname, "renderer", "dist", "index.html");
