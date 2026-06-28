@@ -738,7 +738,7 @@ function App() {
     }
   }, [isNarrationEnabled, speakNarration]);
 
-  const enterFunctionReadyState = useCallback((member) => {
+  const enterFunctionReadyState = useCallback((member, targetMode = "voice") => {
     const operator = member || dataRef.current.authenticatedMember;
     const operatorName = operator?.fullName || "Operator";
     const prompt = `How can I help you, ${operatorName}?`;
@@ -753,12 +753,18 @@ function App() {
     awaitingModulesInputRef.current = false;
     pendingAttackProfileRef.current = null;
     sequenceRunningRef.current = false;
-    modeRef.current = "voice";
-    setInteractionMode("voice");
-    setOrbState("speaking");
+    modeRef.current = targetMode;
+    setInteractionMode(targetMode);
     setSubtitle(prompt);
 
-    if (isNarrationEnabled()) {
+    if (targetMode === "chat") {
+      setOrbState("idle");
+      setChatMessages((messages) => [
+        ...messages.map((message) => (message.active ? { ...message, active: false } : message)),
+        { id: Date.now(), role: "system", text: prompt }
+      ]);
+    } else if (isNarrationEnabled()) {
+      setOrbState("speaking");
       void speakNarration(prompt, "idle");
     } else {
       setOrbState("idle");
@@ -809,7 +815,7 @@ function App() {
         ]);
       }
 
-      await playDialogueStep(getVerificationStep(source), { speak: true });
+      await playDialogueStep(getVerificationStep(source), { speak: source !== "chat" });
 
       const { members, appConfig } = dataRef.current;
       const phraseRequired = appConfig?.authentication?.phraseRequired !== false;
@@ -825,7 +831,7 @@ function App() {
       if (phraseRequired && !member) {
         authRetriesRef.current += 1;
 
-        await playDialogueStep(getAuthFailureStep(), { speak: true });
+        await playDialogueStep(getAuthFailureStep(), { speak: source !== "chat" });
 
         setChatMessages((messages) =>
           messages.map((message) => (message.active ? { ...message, active: false } : message)).concat({
@@ -862,10 +868,10 @@ function App() {
       setAuthenticatedMember(resolvedMember);
 
       if (welcomeByName) {
-        await playDialogueStep(getAuthSuccessStep(resolvedMember.fullName), { speak: true });
+        await playDialogueStep(getAuthSuccessStep(resolvedMember.fullName), { speak: source !== "chat" });
       }
 
-      enterFunctionReadyState(resolvedMember);
+      enterFunctionReadyState(resolvedMember, source === "chat" ? "chat" : "voice");
     },
     [enterFunctionReadyState, playDialogueStep]
   );
@@ -939,7 +945,7 @@ function App() {
         ]);
       }
       setSubtitle(step);
-      if (isNarrationEnabled()) {
+      if (source !== "chat" && isNarrationEnabled()) {
         await speakNarration(step, "thinking");
         await wait(350);
       } else {
@@ -962,7 +968,7 @@ function App() {
     modeRef.current = "reports";
     setInteractionMode("reports");
     setSubtitle(`Report ready for ${targetUrl}.`);
-    if (isNarrationEnabled()) {
+    if (source !== "chat" && isNarrationEnabled()) {
       await speakNarration(`Report ready for ${targetUrl}.`, "idle");
     }
     if (source === "chat") {
@@ -976,7 +982,13 @@ function App() {
     const helpPrompt = `How can I help you, ${operatorName}?`;
     setBootPhase("function_ready");
     setSubtitle(helpPrompt);
-    if (isNarrationEnabled()) {
+    if (source === "chat") {
+      setChatMessages((messages) => [
+        ...messages,
+        { id: Date.now() + Math.random(), role: "system", text: helpPrompt }
+      ]);
+      setOrbState("idle");
+    } else if (isNarrationEnabled()) {
       await speakNarration(helpPrompt, "idle");
     } else {
       setOrbState("idle");
@@ -1006,7 +1018,7 @@ function App() {
 
       const announcement = `Attack on ${targetUrl} is starting. ${attackProfile.memberName}'s script is ready.`;
       setSubtitle(announcement);
-      if (isNarrationEnabled()) {
+      if (source !== "chat" && isNarrationEnabled()) {
         await speakNarration(announcement, "thinking");
       }
 
@@ -1039,7 +1051,7 @@ function App() {
         }
       ]);
     }
-    if (isNarrationEnabled()) {
+    if (source !== "chat" && isNarrationEnabled()) {
       void speakNarration(`Target accepted. What modules should I run?`, "thinking");
     }
   }, [executeScan, isNarrationEnabled, speakNarration]);
@@ -1414,7 +1426,7 @@ function App() {
     startVoiceCommand();
   }, [authenticatedMember, bootComplete, enterFunctionReadyState, startVoiceCommand, stopVoiceInput]);
 
-  const logoutOperator = useCallback(async () => {
+  const logoutOperator = useCallback(async (targetMode = "voice") => {
     if (!dataRef.current.authenticatedMember || sequenceRunningRef.current) return;
 
     sequenceRunningRef.current = true;
@@ -1435,15 +1447,24 @@ function App() {
     setSelectedTarget("");
     setVoiceTranscript("");
     setVoiceError("");
-    modeRef.current = "voice";
-    setInteractionMode("voice");
+    modeRef.current = targetMode;
+    setInteractionMode(targetMode);
     setBootPhase("auth_prompt");
     bootPhaseRef.current = "auth_prompt";
 
-    const prompt = "Please identify yourself using your assigned voice phrase.";
+    const prompt =
+      targetMode === "chat"
+        ? "Please identify yourself using the chat authentication prompt."
+        : "Please identify yourself using your assigned voice phrase.";
     setOrbState("speaking");
     setSubtitle(prompt);
-    if (isNarrationEnabled()) {
+    if (targetMode === "chat") {
+      setOrbState("idle");
+      setChatMessages((messages) => [
+        ...messages,
+        { id: Date.now(), role: "system", text: "Operator logged out. Please identify yourself in Chat." }
+      ]);
+    } else if (isNarrationEnabled()) {
       await speakNarration(prompt, "thinking");
     } else {
       await wait(1200);
@@ -1455,8 +1476,75 @@ function App() {
     awaitingAuthInputRef.current = true;
     sequenceRunningRef.current = false;
     setOrbState("thinking");
-    setSubtitle("Awaiting operator voice input.");
+    setSubtitle(`Awaiting operator ${targetMode === "chat" ? "chat" : "voice"} input.`);
   }, [isNarrationEnabled, speakNarration, stopVoiceInput]);
+
+  const selectAttackProfile = useCallback(async (profile, profileKey, targetMode = "voice") => {
+    if (!profile || bootPhaseRef.current !== "function_ready") return;
+
+    if (targetMode === "voice") {
+      stopSpeech();
+    }
+    pendingAttackProfileRef.current = profile;
+    bootPhaseRef.current = "website_waiting";
+    awaitingWebsiteInputRef.current = true;
+    setBootComplete(false);
+    setBootPhase("website_waiting");
+    setAwaitingWebsiteInput(true);
+    setAwaitingModulesInput(false);
+    setSelectedTarget("");
+
+    const prompt = `Attack profile ${profileKey} selected. What website should I attack?`;
+    setSubtitle(prompt);
+    if (targetMode === "chat") {
+      setOrbState("thinking");
+      setChatMessages((messages) => [
+        ...messages,
+        { id: Date.now(), role: "system", text: prompt }
+      ]);
+    } else {
+      setOrbState("speaking");
+      if (isNarrationEnabled()) {
+        await speakNarration(prompt, "thinking");
+      } else {
+        setOrbState("thinking");
+      }
+    }
+  }, [isNarrationEnabled, speakNarration]);
+
+  const handleChatFunctionKey = useCallback((key) => {
+    const normalizedKey = String(key || "").toLowerCase();
+
+    if (
+      awaitingAuthInputRef.current &&
+      bootPhaseRef.current === "auth_waiting" &&
+      authOperatorKeys[normalizedKey]
+    ) {
+      void handleAuthSubmit(authOperatorKeys[normalizedKey], "chat");
+      return true;
+    }
+
+    if (
+      normalizedKey === "l" &&
+      dataRef.current.authenticatedMember &&
+      !sequenceRunningRef.current
+    ) {
+      void logoutOperator("chat");
+      return true;
+    }
+
+    const profile = digitAttackProfiles[normalizedKey];
+    if (
+      profile &&
+      bootPhaseRef.current === "function_ready" &&
+      dataRef.current.authenticatedMember
+    ) {
+      void selectAttackProfile(profile, normalizedKey, "chat");
+      return true;
+    }
+
+    return false;
+  }, [handleAuthSubmit, logoutOperator, selectAttackProfile]);
 
   const loadProjectData = useCallback(async () => {
     try {
@@ -1532,7 +1620,7 @@ function App() {
 
     setBootPhase("auth_prompt");
     for (const step of getAuthPromptSteps(modeRef.current)) {
-      await playDialogueStep(step, { speak: true });
+      await playDialogueStep(step, { speak: modeRef.current !== "chat" });
     }
 
     setBootPhase("auth_waiting");
@@ -1778,24 +1866,7 @@ function App() {
         dataRef.current.authenticatedMember
       ) {
         event.preventDefault();
-        stopSpeech();
-        pendingAttackProfileRef.current = attackProfile;
-        bootPhaseRef.current = "website_waiting";
-        awaitingWebsiteInputRef.current = true;
-        setBootComplete(false);
-        setBootPhase("website_waiting");
-        setAwaitingWebsiteInput(true);
-        setAwaitingModulesInput(false);
-        setSelectedTarget("");
-
-        const prompt = `Attack profile ${event.key} selected. What website should I attack?`;
-        setOrbState("speaking");
-        setSubtitle(prompt);
-        if (isNarrationEnabled()) {
-          await speakNarration(prompt, "thinking");
-        } else {
-          setOrbState("thinking");
-        }
+        await selectAttackProfile(attackProfile, event.key, "voice");
         return;
       }
 
@@ -1864,6 +1935,7 @@ function App() {
     logoutOperator,
     presentProjectIntroduction,
     selectedScanModules,
+    selectAttackProfile,
     startVoiceCommand
   ]);
 
@@ -1896,6 +1968,7 @@ function App() {
         voiceMuted={voiceMuted}
         voiceVolume={voiceVolume}
         onChatDraftChange={setChatDraft}
+        onChatFunctionKey={handleChatFunctionKey}
         onCommandHistoryNavigate={navigateCommandHistory}
         onChatPromptSubmit={submitChatPrompt}
         onChangeInteractionMode={changeInteractionMode}
@@ -1961,6 +2034,7 @@ function AppShell({
   voiceMuted,
   voiceVolume,
   onChatDraftChange,
+  onChatFunctionKey,
   onCommandHistoryNavigate,
   onChatPromptSubmit,
   onChangeInteractionMode,
@@ -2030,6 +2104,7 @@ function AppShell({
             awaitingWebsiteInput={awaitingWebsiteInput}
             awaitingModulesInput={awaitingModulesInput}
             onDraftChange={onChatDraftChange}
+            onFunctionKey={onChatFunctionKey}
             onHistoryNavigate={onCommandHistoryNavigate}
             onSubmit={onChatPromptSubmit}
           />
@@ -2285,6 +2360,7 @@ function ChatPage({
   awaitingWebsiteInput,
   awaitingModulesInput,
   onDraftChange,
+  onFunctionKey,
   onHistoryNavigate,
   onSubmit
 }) {
@@ -2295,6 +2371,17 @@ function ChatPage({
   }, [messages]);
 
   const handlePromptKeyDown = (event) => {
+    if (
+      !draft.trim() &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      onFunctionKey(event.key)
+    ) {
+      event.preventDefault();
+      return;
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       onSubmit(event);
