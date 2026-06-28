@@ -11,6 +11,7 @@ import {
 } from "./lib/bootDialogue.js";
 import { loadProjectRegistry } from "./lib/dataLoader.js";
 import { matchMemberPhrase } from "./lib/memberAuth.js";
+import { ensureVoicesLoaded, speakCalm, stopSpeech } from "./lib/tts.js";
 import "./styles.css";
 
 const defaultScanTarget = "shopnest.com";
@@ -469,7 +470,7 @@ function App() {
     voiceMutedRef.current = voiceMuted;
     window.localStorage.setItem("anubis:voiceMuted", String(voiceMuted));
     if (voiceMuted) {
-      window.speechSynthesis?.cancel();
+      stopSpeech();
     }
   }, [voiceMuted]);
 
@@ -601,49 +602,68 @@ function App() {
     });
   }, []);
 
-  const speakVoiceStep = useCallback((text, afterEndState = "thinking") => {
-    if (voiceMutedRef.current || !window.speechSynthesis) return;
-
-    const speechToken = speechTokenRef.current + 1;
-    speechTokenRef.current = speechToken;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "en-US";
-    utterance.rate = 0.92;
-    utterance.pitch = 0.85;
-    utterance.volume = voiceVolumeRef.current;
-    utterance.onstart = () => {
-      if (speechTokenRef.current === speechToken) {
-        setOrbState("speaking");
-      }
-    };
-    utterance.onend = () => {
-      if (speechTokenRef.current === speechToken) {
-        setOrbState(afterEndState);
-      }
-    };
-    utterance.onerror = () => {
-      if (speechTokenRef.current === speechToken) {
-        setOrbState(afterEndState);
-      }
-    };
-    window.speechSynthesis.speak(utterance);
+  const isNarrationEnabled = useCallback(() => {
+    const config = dataRef.current.appConfig || {};
+    return config.voice?.ttsEnabled !== false && !voiceMutedRef.current && Boolean(window.speechSynthesis);
   }, []);
 
+  const isSubtitleEnabled = useCallback(() => {
+    const config = dataRef.current.appConfig || {};
+    return config.ui?.subtitleEnabled !== false;
+  }, []);
+
+  const getCalmSpeechVolume = useCallback(() => {
+    return Math.min(0.82, Math.max(0.35, voiceVolumeRef.current * 0.72));
+  }, []);
+
+  const speakNarration = useCallback(
+    async (text, afterEndState = "thinking") => {
+      if (!isNarrationEnabled()) return;
+
+      const speechToken = speechTokenRef.current + 1;
+      speechTokenRef.current = speechToken;
+
+      await speakCalm(text, {
+        volume: getCalmSpeechVolume(),
+        rate: 0.8,
+        pitch: 0.94,
+        onStart: () => {
+          if (speechTokenRef.current === speechToken) {
+            setOrbState("speaking");
+          }
+        },
+        onEnd: () => {
+          if (speechTokenRef.current === speechToken) {
+            setOrbState(afterEndState);
+          }
+        }
+      });
+    },
+    [getCalmSpeechVolume, isNarrationEnabled]
+  );
+
   const playDialogueStep = useCallback(
-    async (step, { speak = false } = {}) => {
+    async (step, { speak = true } = {}) => {
       if (bootAbortRef.current) return;
 
-      setOrbState(step.state || "idle");
-      setSubtitle(step.text);
+      const nextState = step.state || "idle";
+      setOrbState(nextState);
 
-      if (speak && modeRef.current === "voice") {
-        speakVoiceStep(step.text, step.state === "speaking" ? "speaking" : step.state || "thinking");
+      if (isSubtitleEnabled()) {
+        setSubtitle(step.text);
+      }
+
+      const shouldSpeak = speak && isNarrationEnabled();
+
+      if (shouldSpeak) {
+        await speakNarration(step.text, nextState === "speaking" ? "speaking" : nextState);
+        await wait(450);
+        return;
       }
 
       await wait(step.delay || 1800);
     },
-    [speakVoiceStep]
+    [isNarrationEnabled, isSubtitleEnabled, speakNarration]
   );
 
   const beginWebsiteSelection = useCallback(() => {
@@ -660,7 +680,10 @@ function App() {
         text: "Authentication complete. Enter the website to simulate, or press Ctrl+Space."
       }
     ]);
-  }, []);
+    if (isNarrationEnabled()) {
+      void speakNarration("Authentication complete. What website should I simulate?", "thinking");
+    }
+  }, [isNarrationEnabled, speakNarration]);
 
   const handleAuthSubmit = useCallback(
     async (phrase, source = "chat") => {
@@ -679,7 +702,7 @@ function App() {
         { id: Date.now() + 1, role: "system", text: "Verifying operator identity signature.", active: true }
       ]);
 
-      await playDialogueStep(getVerificationStep(source), { speak: source === "voice" });
+      await playDialogueStep(getVerificationStep(source), { speak: true });
 
       const { members, appConfig } = dataRef.current;
       const phraseRequired = appConfig?.authentication?.phraseRequired !== false;
@@ -695,7 +718,7 @@ function App() {
       if (phraseRequired && !member) {
         authRetriesRef.current += 1;
 
-        await playDialogueStep(getAuthFailureStep(), { speak: source === "voice" });
+        await playDialogueStep(getAuthFailureStep(), { speak: true });
 
         setChatMessages((messages) =>
           messages.map((message) => (message.active ? { ...message, active: false } : message)).concat({
@@ -732,7 +755,7 @@ function App() {
       setAuthenticatedMember(resolvedMember);
 
       if (welcomeByName) {
-        await playDialogueStep(getAuthSuccessStep(resolvedMember.fullName), { speak: source === "voice" });
+        await playDialogueStep(getAuthSuccessStep(resolvedMember.fullName), { speak: true });
       }
 
       beginWebsiteSelection();
@@ -782,10 +805,12 @@ function App() {
         { id: activeId, role: "system", text: step, active: true }
       ]);
       setSubtitle(step);
-      if (source === "voice") {
-        speakVoiceStep(step);
+      if (isNarrationEnabled()) {
+        await speakNarration(step, "thinking");
+        await wait(350);
+      } else {
+        await wait(randomDelay(scanDelayRange.min, scanDelayRange.max));
       }
-      await wait(randomDelay(scanDelayRange.min, scanDelayRange.max));
       setChatMessages((messages) =>
         messages.map((message) => (message.id === activeId ? { ...message, active: false } : message))
       );
@@ -799,17 +824,17 @@ function App() {
     modeRef.current = "reports";
     setInteractionMode("reports");
     setSubtitle(`Report ready for ${targetUrl}.`);
-    if (source === "voice") {
-      speakVoiceStep(`Report ready for ${targetUrl}.`, "idle");
+    if (isNarrationEnabled()) {
+      await speakNarration(`Report ready for ${targetUrl}.`, "idle");
     }
     setChatMessages((messages) => [
       ...messages,
       { id: Date.now() + Math.random(), role: "system", text: `Report ready for ${targetUrl}.` }
     ]);
-    if (source !== "voice" || voiceMutedRef.current || !window.speechSynthesis) {
+    if (!isNarrationEnabled()) {
       setOrbState("idle");
     }
-  }, [scanDelayRange.max, scanDelayRange.min, speakVoiceStep]);
+  }, [isNarrationEnabled, scanDelayRange.max, scanDelayRange.min, speakNarration]);
 
   const handleWebsiteSubmit = useCallback((website, source = "chat") => {
     if (!awaitingWebsiteInputRef.current || bootPhaseRef.current !== "website_waiting") return;
@@ -835,10 +860,10 @@ function App() {
         text: `Target accepted: ${targetUrl}. Enter modules such as SQL, stored XSS, XXE, or all. Ctrl+Space uses selected Settings modules.`
       }
     ]);
-    if (source === "voice") {
-      speakVoiceStep(`Target accepted. What modules should I run?`);
+    if (isNarrationEnabled()) {
+      void speakNarration(`Target accepted. What modules should I run?`, "thinking");
     }
-  }, [speakVoiceStep]);
+  }, [isNarrationEnabled, speakNarration]);
 
   const handleModulesSubmit = useCallback(async (moduleText, source = "chat") => {
     if (!awaitingModulesInputRef.current || bootPhaseRef.current !== "modules_waiting") return;
@@ -1262,7 +1287,7 @@ function App() {
 
     setBootPhase("auth_prompt");
     for (const step of getAuthPromptSteps(modeRef.current)) {
-      await playDialogueStep(step, { speak: modeRef.current === "voice" });
+      await playDialogueStep(step, { speak: true });
     }
 
     setBootPhase("auth_waiting");
@@ -1318,7 +1343,7 @@ function App() {
 
     setBootPhase("boot_narration");
     for (const step of BOOT_NARRATION) {
-      await playDialogueStep(step, { speak: modeRef.current === "voice" });
+      await playDialogueStep(step, { speak: true });
     }
 
     if (bootAbortRef.current) return;
@@ -1348,9 +1373,13 @@ function App() {
   }, [runFullBootSequence]);
 
   useEffect(() => {
+    ensureVoicesLoaded();
+  }, []);
+
+  useEffect(() => {
     return () => {
       window.electronAPI?.stopNativeVoice?.();
-      window.speechSynthesis?.cancel();
+      stopSpeech();
       stopVoiceInput();
     };
   }, [stopVoiceInput]);
@@ -1656,7 +1685,8 @@ function AppShell({
 
       <BackgroundLayer />
 
-      <main className="relative z-[2] h-full w-full px-[4vw] pb-[5vh] pt-[4vh]">
+      <main className="relative z-[2] grid h-full w-full grid-rows-[1fr_auto] px-[4vw] pb-[3vh] pt-[4vh]">
+        <div className="min-h-0 overflow-hidden">
         {interactionMode === "settings" ? (
           <SettingsPage
             audioInputDevices={audioInputDevices}
@@ -1687,12 +1717,8 @@ function AppShell({
           />
         ) : (
           <VoicePage
-            audioInputDevices={audioInputDevices}
-            selectedMicId={selectedMicId}
             isListening={isListening}
             orbState={orbState}
-            subtitle={subtitle}
-            transcript={voiceTranscript}
             voiceLevel={voiceLevel}
             voiceError={voiceError}
             voiceMuted={voiceMuted}
@@ -1702,13 +1728,13 @@ function AppShell({
             awaitingModulesInput={awaitingModulesInput}
             bootComplete={bootComplete}
             authenticatedMember={authenticatedMember}
-            onMicChange={onMicChange}
-            onMicRefresh={onMicRefresh}
             onVoiceMuteToggle={onVoiceMuteToggle}
             onVoiceVolumeChange={onVoiceVolumeChange}
             onVoiceCommandStart={onVoiceCommandStart}
           />
         )}
+        </div>
+        <Subtitle text={subtitle} />
       </main>
     </div>
   );
@@ -1825,12 +1851,8 @@ function SettingsPage({
 }
 
 function VoicePage({
-  audioInputDevices,
-  selectedMicId,
   isListening,
   orbState,
-  subtitle,
-  transcript,
   voiceLevel,
   voiceError,
   voiceMuted,
@@ -1840,52 +1862,17 @@ function VoicePage({
   awaitingModulesInput,
   bootComplete,
   authenticatedMember,
-  onMicChange,
-  onMicRefresh,
   onVoiceCommandStart,
   onVoiceMuteToggle,
   onVoiceVolumeChange
 }) {
-  const activeMicLabel = getMicLabel(audioInputDevices, selectedMicId);
   const showMicWarning = isListening && voiceLevel < 3;
 
   return (
-    <div className="grid h-full w-full grid-rows-[1fr_auto_auto] place-items-center">
+    <div className="grid h-full w-full grid-rows-[1fr_auto] place-items-center">
       <section className="mb-[2vh] flex min-h-[120px] items-center justify-center self-end" />
       <Orb state={orbState} />
       <div className="mt-1 flex w-[min(640px,90vw)] flex-col items-center gap-3">
-        <section className="w-full rounded-lg border border-anubis-violet/15 bg-[#080512]/55 p-3 shadow-panel backdrop-blur">
-          <div className="mb-2 text-[10px] font-semibold uppercase tracking-[.18em] text-anubis-faint">
-            Active microphone
-          </div>
-          <div className="flex gap-2">
-            <select
-              value={selectedMicId}
-              onChange={(event) => onMicChange(event.target.value)}
-              className="h-10 flex-1 rounded-md border border-white/10 bg-[#05030c]/90 px-3 text-xs text-anubis-text outline-none focus:border-anubis-bright/45 focus:ring-2 focus:ring-anubis-violet/20"
-            >
-              {audioInputDevices.length ? (
-                audioInputDevices.map((device, index) => (
-                  <option key={device.deviceId} value={device.deviceId}>
-                    {device.label || `Microphone ${index + 1}`}
-                  </option>
-                ))
-              ) : (
-                <option value="">No microphone detected</option>
-              )}
-            </select>
-            <button
-              type="button"
-              onClick={() => onMicRefresh()}
-              className="min-w-[92px] rounded-md border border-anubis-bright/25 bg-anubis-violet/20 px-3 text-[10px] font-semibold uppercase tracking-[.14em] text-anubis-text transition hover:bg-anubis-violet/30 hover:text-white"
-            >
-              Refresh
-            </button>
-          </div>
-          <div className="mt-2 text-[11px] leading-relaxed tracking-[.06em] text-anubis-faint">
-            Voice input uses: <span className="text-anubis-text">{activeMicLabel}</span>
-          </div>
-        </section>
         <div className="flex flex-wrap items-center justify-center gap-3">
           <button
             type="button"
@@ -1942,22 +1929,6 @@ function VoicePage({
             </div>
           </div>
         </div>
-        <div className="flex min-h-[58px] w-full items-center justify-center rounded-lg border border-anubis-violet/15 bg-[#080512]/55 px-4 py-3 text-center text-sm leading-relaxed text-anubis-text shadow-panel">
-          {transcript ||
-            (isListening
-              ? awaitingAuthInput
-                ? "Listening for authentication phrase..."
-                : "Listening..."
-              : awaitingAuthInput
-                ? "Awaiting operator authentication phrase."
-                : awaitingWebsiteInput
-                  ? "What website should I simulate? Press Ctrl+Space."
-                  : awaitingModulesInput
-                    ? "What modules should I run? Press Ctrl+Space."
-                : bootComplete
-                  ? "Awaiting voice command."
-                  : "Boot sequence in progress.")}
-        </div>
         {authenticatedMember ? (
           <div className="text-center text-xs uppercase tracking-[.16em] text-anubis-faint">
             Operator: {authenticatedMember.fullName}
@@ -1970,7 +1941,7 @@ function VoicePage({
         ) : null}
         {showMicWarning ? (
           <div className="max-w-full rounded-md border border-yellow-300/20 bg-yellow-500/10 px-3 py-2 text-center text-xs leading-relaxed text-yellow-100">
-            No audio detected on {activeMicLabel}. Choose another microphone above or check Windows sound settings.
+            No audio detected. Open the Settings tab to choose your microphone.
           </div>
         ) : null}
         <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
@@ -1980,7 +1951,6 @@ function VoicePage({
           />
         </div>
       </div>
-      <Subtitle text={subtitle} />
     </div>
   );
 }
@@ -2315,9 +2285,9 @@ function Orb({ state }) {
 
 function Subtitle({ text }) {
   return (
-    <section className="mt-[2.5vh] flex w-full justify-center self-start" aria-live="polite">
-      <div className="flex min-h-[84px] w-[min(760px,90vw)] items-center justify-center rounded-full border border-anubis-violet/20 bg-[linear-gradient(180deg,rgba(16,10,30,.55),rgba(10,6,22,.34))] px-7 py-[22px] shadow-panel backdrop-blur">
-        <p className="text-center text-[clamp(16px,1.2vw,22px)] leading-relaxed tracking-[.04em] text-anubis-text">
+    <section className="flex w-full justify-center pb-[1vh] pt-[1.5vh]" aria-live="polite" aria-atomic="true">
+      <div className="flex min-h-[84px] w-[min(860px,92vw)] items-center justify-center rounded-full border border-anubis-violet/25 bg-[linear-gradient(180deg,rgba(16,10,30,.72),rgba(10,6,22,.48))] px-8 py-[22px] shadow-[0_0_32px_rgba(155,108,255,.12)] backdrop-blur-md">
+        <p className="text-center text-[clamp(17px,1.25vw,24px)] font-medium leading-relaxed tracking-[.03em] text-anubis-text [text-shadow:0_0_18px_rgba(196,166,255,.16)]">
           {text}
         </p>
       </div>

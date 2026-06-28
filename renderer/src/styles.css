@@ -118,3 +118,18 @@ select {
   width: 112px;
   transform: rotate(-90deg);
 }
+.hidden-hotspot-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hidden-hotspot {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+  pointer-events: auto;
+}
