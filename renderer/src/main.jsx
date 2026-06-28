@@ -15,12 +15,8 @@ import { ensureVoicesLoaded, speakCalm, stopSpeech } from "./lib/tts.js";
 import "./styles.css";
 
 const defaultScanTarget = "shopnest.com";
-const projectAbstract = [
-  "This graduation project presents the design, development, and implementation of ANUBIS, an intelligent desktop-based cybersecurity assistant designed to support security testing operations through natural operator interaction and real-time system monitoring. The system is implemented as an Electron application with a React-based user interface that provides both voice and chat interaction modes, allowing the operator to communicate with the platform using flexible command input while observing execution status through a dynamic visual interface.",
-  "The system architecture is divided into two main layers: the client interaction layer and the execution communication layer. The client layer is responsible for rendering the graphical interface, managing the cinematic startup sequence, displaying status updates, processing operator input, handling speech recognition, and controlling application windows through a secure preload bridge. The execution layer is connected through a WebSocket channel to a backend service that receives interpreted commands, starts testing runs, returns progress events, and reports final execution results.",
-  "The primary purpose of this project is to simplify the interaction between the security operator and multiple testing modules by transforming natural-language commands into structured execution requests. The system extracts target URLs, maps spoken or typed phrases into security modules, and supports scenario-driven workflows that include vulnerability categories such as SQL Injection, Cross-Site Scripting, OS Command Injection, XXE, Path Traversal, Access Control, HTTP Request Smuggling, and WebSocket Analysis.",
-  "The project demonstrates a practical integration of desktop application engineering, human-computer interaction, and cybersecurity task orchestration. It provides a clear operational interface, real-time feedback, and a modular foundation that can be expanded in the future to support richer backend automation, stronger analytics, and more advanced intelligent assistance capabilities."
-];
+const projectIntroductionSummary =
+  "ANUBIS is our graduation project: an intelligent desktop cybersecurity assistant built with Electron and React. It allows security operators to use voice or chat to select a website and security testing modules, while the orb provides clear, real-time execution feedback. A secure preload bridge separates the interface from privileged desktop operations, and a WebSocket-ready execution layer supports backend progress and results. ANUBIS combines cybersecurity orchestration, desktop engineering, and human-computer interaction in a modular platform designed for future automation and advanced analytics.";
 
 const scanModuleOptions = [
   { id: "sqli", label: "SQL Injection" },
@@ -1556,10 +1552,12 @@ function App() {
       ) {
         event.preventDefault();
         stopSpeech();
-        modeRef.current = "introduction";
-        setInteractionMode("introduction");
-        setOrbState("idle");
-        setSubtitle("ANUBIS project introduction.");
+        setSubtitle(projectIntroductionSummary);
+        if (isNarrationEnabled()) {
+          void speakNarration(projectIntroductionSummary, "idle");
+        } else {
+          setOrbState("idle");
+        }
         return;
       }
 
@@ -1624,8 +1622,10 @@ function App() {
     handleAuthSubmit,
     handleModulesSubmit,
     handleWebsiteSubmit,
+    isNarrationEnabled,
     introActive,
     selectedScanModules,
+    speakNarration,
     startVoiceCommand
   ]);
 
@@ -1767,9 +1767,7 @@ function AppShell({
 
       <main className="relative z-[2] grid h-full w-full grid-rows-[1fr_auto] px-[4vw] pb-[3vh] pt-[4vh]">
         <div className="min-h-0 overflow-hidden">
-        {interactionMode === "introduction" ? (
-          <IntroductionPage onBack={() => onChangeInteractionMode("voice")} />
-        ) : interactionMode === "settings" ? (
+        {interactionMode === "settings" ? (
           <SettingsPage
             audioInputDevices={audioInputDevices}
             selectedMicId={selectedMicId}
@@ -1818,35 +1816,6 @@ function AppShell({
         </div>
         <Subtitle text={subtitle} />
       </main>
-    </div>
-  );
-}
-
-function IntroductionPage({ onBack }) {
-  return (
-    <div className="chat-scrollbar mx-auto h-full w-[min(980px,94vw)] overflow-y-auto pb-10 pt-20">
-      <header className="flex items-end justify-between gap-6 border-b border-anubis-violet/20 pb-5">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-[.28em] text-anubis-faint">ANUBIS PROJECT</div>
-          <h1 className="mt-2 text-2xl font-semibold tracking-[.08em] text-anubis-text">Introduction</h1>
-        </div>
-        <button
-          type="button"
-          onClick={onBack}
-          className="rounded-full border border-anubis-bright/25 bg-anubis-violet/15 px-5 py-2 text-xs font-semibold uppercase tracking-[.18em] text-anubis-text transition hover:bg-anubis-violet/25 hover:text-white"
-        >
-          Return
-        </button>
-      </header>
-
-      <article className="mt-6 rounded-xl border border-anubis-violet/15 bg-[#080512]/65 p-7 shadow-panel backdrop-blur">
-        <div className="mb-5 text-xs font-semibold uppercase tracking-[.24em] text-anubis-bright">Abstract</div>
-        <div className="space-y-5 text-[15px] leading-8 tracking-[.02em] text-anubis-muted">
-          {projectAbstract.map((paragraph) => (
-            <p key={paragraph}>{paragraph}</p>
-          ))}
-        </div>
-      </article>
     </div>
   );
 }
@@ -2042,12 +2011,6 @@ function VoicePage({
             </div>
           </div>
         </div>
-        {authenticatedMember && bootComplete ? (
-          <div className="rounded-full border border-anubis-violet/20 bg-[#100a1e]/55 px-4 py-2 text-[11px] font-semibold uppercase tracking-[.18em] text-anubis-faint">
-            <span className="mr-2 text-anubis-bright">↑</span>
-            Project introduction
-          </div>
-        ) : null}
         {authenticatedMember ? (
           <div className="text-center text-xs uppercase tracking-[.16em] text-anubis-faint">
             Operator: {authenticatedMember.fullName}
