@@ -882,19 +882,36 @@ function App() {
       ]);
     }
     setOrbState("thinking");
-    setSubtitle(`Attack target: ${targetUrl}. Modules: ${moduleLabel}.`);
+    setSubtitle(
+      memberName
+        ? `Attack target: ${targetUrl}. Script owner: ${memberName}.`
+        : `Attack target: ${targetUrl}. Modules: ${moduleLabel}.`
+    );
     if (source === "voice") {
-      setVoiceTranscript(`Attack ${targetUrl} using ${moduleLabel}.`);
+      setVoiceTranscript(
+        memberName
+          ? `Attack ${targetUrl} using ${memberName}'s script.`
+          : `Attack ${targetUrl} using ${moduleLabel}.`
+      );
     }
 
-    const steps = [
-      `Preparing attack workspace for ${targetUrl}.`,
-      `Loading attack modules: ${moduleLabel}.`,
-      `Mapping application routes for ${targetUrl}.`,
-      ...moduleLabels.map((label) => `Attacking ${targetUrl} with ${label}.`),
-      `Validating attack evidence for ${targetUrl}.`,
-      `Preparing security report for ${targetUrl}.`
-    ];
+    const steps = memberName
+      ? [
+          `Starting attack against ${targetUrl}.`,
+          `Crawling ${targetUrl} and mapping application routes.`,
+          `Executing the security script prepared by ${memberName}.`,
+          `Analyzing responses and validating collected evidence.`,
+          `${memberName}'s script found ${moduleLabel} on ${targetUrl}.`,
+          `Preparing the final security report for ${targetUrl}.`
+        ]
+      : [
+          `Preparing attack workspace for ${targetUrl}.`,
+          `Loading attack modules: ${moduleLabel}.`,
+          `Mapping application routes for ${targetUrl}.`,
+          ...moduleLabels.map((label) => `Attacking ${targetUrl} with ${label}.`),
+          `Validating attack evidence for ${targetUrl}.`,
+          `Preparing security report for ${targetUrl}.`
+        ];
 
     for (const [index, step] of steps.entries()) {
       const activeId = stepIdBase + index;
@@ -963,7 +980,7 @@ function App() {
       setBootPhase("attacking");
       sequenceRunningRef.current = true;
 
-      const announcement = `Attack on ${targetUrl} using ${attackProfile.vulnerability} is starting.`;
+      const announcement = `Attack on ${targetUrl} is starting. ${attackProfile.memberName}'s script is ready.`;
       setSubtitle(announcement);
       if (isNarrationEnabled()) {
         await speakNarration(announcement, "thinking");
@@ -1675,7 +1692,7 @@ function App() {
         setAwaitingModulesInput(false);
         setSelectedTarget("");
 
-        const prompt = `${attackProfile.vulnerability}, assigned to ${attackProfile.memberName}. What website should I attack?`;
+        const prompt = `Attack profile ${event.key} selected. What website should I attack?`;
         setOrbState("speaking");
         setSubtitle(prompt);
         if (isNarrationEnabled()) {
