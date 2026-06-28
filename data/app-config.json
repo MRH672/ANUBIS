@@ -44,11 +44,6 @@
     "fakeSuccessScoreEnabled": true,
     "defaultDurationSeconds": 180
   },
-  "targets": {
-    "selectionMode": "voice",
-    "allowedMachines": ["Machine one", "Machine two", "Machine three"],
-    "defaultMachine": "Machine one"
-  },
   "reports": {
     "enabled": true,
     "saveDirectory": "./Reports",
@@ -58,7 +53,10 @@
   "testing": {
     "demoFlowEnabled": true,
     "keyboardShortcutsEnabled": true,
-    "manualStateSwitchingEnabled": true
+    "manualStateSwitchingEnabled": true,
+    "demoAuthPhrase": "Hassan Hesham one point one",
+    "demoWebsite": "shopnest.com",
+    "demoKeybind": "Ctrl+Space"
   },
   "audio": {
     "bootSfx": "./assets/audio/sfx/boot.mp3",

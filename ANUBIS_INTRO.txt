@@ -2,11 +2,11 @@
 WELCOME TO ANUBIS.
 I am ANUBIS.
 An intelligent cyber simulation entity designed to interpret voice commands, map operator identity, and deliver structured vulnerability scenarios with precision.
-My core functions include operator recognition, scenario alignment, target acquisition, cinematic execution flow, and analytical report generation.
+My core functions include operator recognition, website selection, module alignment, cinematic execution flow, and analytical report generation.
 Supported scenarios include SQL Injection, Reflected XSS, Stored XSS, OS Command Injection, Path Traversal, XXE Injection, Information Disclosure, Access Control, HTTP Request Smuggling, and WebSocket analysis.
 
 Each request is processed through synchronized voice interaction, responsive state transitions, and AI-styled reporting logic.
 To initiate sequence control, identify yourself using your assigned voice phrase.
-Then state the required scenario and specify the target machine.
+Then specify the website and state the required modules.
 ANUBIS is online.
 Awaiting authentication.

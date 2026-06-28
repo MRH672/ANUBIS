@@ -17,15 +17,13 @@ async function loadJsonFile(paths) {
 }
 
 export async function loadProjectRegistry() {
-  const [machinesData, scenariosData, membersData, appConfig] = await Promise.all([
-    loadJsonFile(dataPathCandidates.machines),
+  const [scenariosData, membersData, appConfig] = await Promise.all([
     loadJsonFile(dataPathCandidates.scenarios),
     loadJsonFile(dataPathCandidates.members),
     loadJsonFile(dataPathCandidates.appConfig)
   ]);
 
   return {
-    machines: Array.isArray(machinesData.machines) ? machinesData.machines.filter((item) => item.active) : [],
     scenarios: Array.isArray(scenariosData.scenarios) ? scenariosData.scenarios.filter((item) => item.active) : [],
     members: Array.isArray(membersData.members) ? membersData.members.filter((item) => item.active) : [],
     appConfig: appConfig || {}

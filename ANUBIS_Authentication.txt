@@ -1,155 +1,56 @@
-ANUBIS opens authentication
-ANUBIS:
-Operator authentication sequence initiated.
-Please identify yourself using your assigned voice phrase.
+ANUBIS setup flow
 
-If member speaks correctly
-MEMBER:
-[Assigned voice phrase]
-Example: Hassan Hesham one point one.
-
-ANUBIS:
-Identity pattern received.
-Verifying operator signature.
-
-ANUBIS:
-Authentication successful.
-Welcome, Hassan Hesham.
-State the required scenario.
-
-If member says scenario
-MEMBER:
-SQL Injection.
-or
-Stored XSS.
-or
-Access Control.
-
-ANUBIS:
-Scenario received.
-SQL Injection selected.
-Awaiting target designation.
-Please specify the target machine.
-
-If member says target
-MEMBER:
-Machine one.
-
-ANUBIS:
-Target received.
-Machine one selected.
-Preparing execution flow.
-
-ANUBIS:
-Please stand by.
-
-Full connected version
-دي نسخة كاملة متوصلة ببعضها كأنها session واحدة:
+1. Authentication
 
 ANUBIS:
 Operator authentication sequence initiated.
-Please identify yourself using your assigned voice phrase.
+Please identify yourself using your assigned phrase.
 
-MEMBER:
+OPERATOR:
 Hassan Hesham one point one.
 
 ANUBIS:
 Identity pattern received.
 Verifying operator signature.
-
-ANUBIS:
 Authentication successful.
 Welcome, Hassan Hesham.
-State the required scenario.
 
-MEMBER:
-SQL Injection.
+2. Website
 
 ANUBIS:
-Scenario received.
-SQL Injection selected.
-Awaiting target designation.
-Please specify the target machine.
+What website should I simulate?
 
-MEMBER:
-Machine one.
+OPERATOR:
+shopnest.com
 
 ANUBIS:
-Target received.
-Machine one selected.
-Preparing execution flow.
-Please stand by.
-=======================================
-حالات الخطأ
-لازم يكون عندك 3 ردود fallback ثابتة:
+Target accepted: shopnest.com.
+What modules should I run?
 
-لو phrase غير واضحة
-ANUBIS:
-Identity phrase not recognized.
-Please repeat your assigned voice phrase.
+3. Modules
 
-لو السيناريو غير واضح
-ANUBIS:
-Scenario not recognized.
-Please state the scenario again.
-
-لو target غير واضح
-ANUBIS:
-Target designation not recognized.
-Please repeat the target machine
-================================
-ANUBIS:
-Operator authentication sequence initiated.
-Please identify yourself using your assigned voice phrase.
-
-MEMBER:
-[Assigned voice phrase]
-Example: Hassan Hesham one point one.
+OPERATOR:
+SQL Injection, Reflected XSS.
 
 ANUBIS:
-Identity pattern received.
-Verifying operator signature.
+Modules accepted.
+Preparing simulation.
 
-ANUBIS:
-Authentication successful.
-Welcome, Hassan Hesham.
-State the required scenario.
+Demo keybind
 
-MEMBER:
-SQL Injection.
-or
-Stored XSS.
-or
-Access Control.
+Press Ctrl+Space once per prompt:
 
-ANUBIS:
-Scenario received.
-SQL Injection selected.
-Awaiting target designation.
-Please specify the target machine.
+- Authentication: submits configured demoAuthPhrase.
+- Website: submits configured demoWebsite.
+- Modules: submits modules selected in Settings.
 
-MEMBER:
-Machine one.
+Fallbacks
 
-ANUBIS:
-Target received.
-Machine one selected.
-Preparing execution flow.
-Please stand by.
+Authentication:
+Authentication failed. Phrase not recognized.
 
-fallback المعتمد
-If phrase is unclear
-ANUBIS:
-Identity phrase not recognized.
-Please repeat your assigned voice phrase.
+Website:
+Website not recognized. Enter a hostname or URL.
 
-If scenario is unclear
-ANUBIS:
-Scenario not recognized.
-Please state the scenario again.
-
-If target is unclear
-ANUBIS:
-Target designation not recognized.
-Please repeat the target machine.
-
+Modules:
+Modules not recognized. State supported modules or all.

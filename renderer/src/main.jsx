@@ -6,35 +6,43 @@ import {
   getAuthFailureStep,
   getAuthPromptSteps,
   getAuthSuccessStep,
-  getHandoffStep,
-  getPostAuthSteps,
-  getReadyStep,
   getVerificationStep,
   INTRO_WORDS
 } from "./lib/bootDialogue.js";
 import { loadProjectRegistry } from "./lib/dataLoader.js";
 import { matchMemberPhrase } from "./lib/memberAuth.js";
-import { resolveDefaultMachine, resolveScenarioForMember } from "./lib/registry.js";
 import "./styles.css";
 
-const scanTarget = "shopnest.com";
+const defaultScanTarget = "shopnest.com";
 const scanModuleOptions = [
   { id: "sqli", label: "SQL Injection" },
-  { id: "xss", label: "XSS" },
   { id: "osci", label: "Command Injection" },
+  { id: "reflected-xss", label: "Reflected XSS" },
+  { id: "stored-xss", label: "Stored XSS" },
+  { id: "information", label: "Information Disclosure" },
   { id: "xml", label: "XXE" },
   { id: "path", label: "Path Traversal" },
   { id: "access", label: "Access Control" },
+  { id: "smuggling", label: "HTTP Request Smuggling" },
   { id: "websocket", label: "WebSocket" }
 ];
 
 const moduleAliases = [
+  ["stored xss", "stored-xss"],
+  ["stored cross site scripting", "stored-xss"],
+  ["reflected xss", "reflected-xss"],
+  ["reflected cross site scripting", "reflected-xss"],
+  ["information disclosure", "information"],
+  ["information", "information"],
+  ["request smuggling", "smuggling"],
+  ["http smuggling", "smuggling"],
+  ["smuggling", "smuggling"],
   ["sql injection", "sqli"],
   ["sqli", "sqli"],
   ["sql", "sqli"],
-  ["cross site scripting", "xss"],
-  ["cross-site scripting", "xss"],
-  ["xss", "xss"],
+  ["cross site scripting", "reflected-xss"],
+  ["cross-site scripting", "reflected-xss"],
+  ["xss", "reflected-xss"],
   ["command injection", "osci"],
   ["os command", "osci"],
   ["cmdi", "osci"],
@@ -85,14 +93,33 @@ function buildFinding(moduleId, targetUrl) {
         response: "{\"type\":\"order_status\",\"order\":1002,\"status\":\"processing\",\"total\":64.98,\"customer\":\"alice\"}"
       }
     },
-    xss: {
+    "reflected-xss": {
       severity: "medium",
       name: "Reflected Input Rendering",
       matched_at: `https://${targetUrl}/search?q=operator`,
-      type: "xss",
+      type: "reflected-xss",
       evidence: {
         parameter: "q",
         response: "Search term rendered without output encoding in page content."
+      }
+    },
+    "stored-xss": {
+      severity: "high",
+      name: "Stored Input Rendering",
+      matched_at: `https://${targetUrl}/comments`,
+      type: "stored-xss",
+      evidence: {
+        parameter: "comment",
+        response: "Stored user content rendered without output encoding."
+      }
+    },
+    information: {
+      severity: "medium",
+      name: "Sensitive Information Disclosure",
+      matched_at: `https://${targetUrl}/debug`,
+      type: "information-disclosure",
+      evidence: {
+        response: "Application metadata and internal details exposed to an unauthenticated user."
       }
     },
     sqli: {
@@ -143,6 +170,15 @@ function buildFinding(moduleId, targetUrl) {
       evidence: {
         parameter: "order",
         response: "Order object returned without ownership validation."
+      }
+    },
+    smuggling: {
+      severity: "critical",
+      name: "HTTP Request Parsing Desynchronization",
+      matched_at: `https://${targetUrl}/`,
+      type: "http-request-smuggling",
+      evidence: {
+        response: "Front-end and back-end request boundary interpretation differed during simulation."
       }
     }
   };
@@ -273,11 +309,28 @@ function interpretOperatorCommand(text) {
     }
   }
 
+  if (modules.includes("stored-xss") && !lowered.includes("reflected")) {
+    const reflectedIndex = modules.indexOf("reflected-xss");
+    if (reflectedIndex >= 0) modules.splice(reflectedIndex, 1);
+  }
+
   return {
     command: text,
-    target_url: scanTarget,
+    target_url: defaultScanTarget,
     modules: modules.length ? modules : ["all"]
   };
+}
+
+function normalizeTargetInput(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+
+  try {
+    const url = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    return `${url.host}${url.pathname === "/" ? "" : url.pathname}`.replace(/\/$/, "");
+  } catch {
+    return "";
+  }
 }
 
 function getMicLabel(devices, deviceId) {
@@ -351,7 +404,16 @@ function App() {
   const [selectedMicId, setSelectedMicId] = useState(() => window.localStorage.getItem("anubis:selectedMicId") || "");
   const [selectedScanModules, setSelectedScanModules] = useState(() => {
     const saved = window.localStorage.getItem("anubis:selectedScanModules");
-    return saved ? JSON.parse(saved) : ["xss"];
+    if (!saved) return ["sqli"];
+
+    try {
+      const parsed = JSON.parse(saved);
+      const migrated = parsed.map((moduleId) => (moduleId === "xss" ? "reflected-xss" : moduleId));
+      const valid = migrated.filter((moduleId) => scanModuleOptions.some((option) => option.id === moduleId));
+      return valid.length ? valid : ["sqli"];
+    } catch {
+      return ["sqli"];
+    }
   });
   const [scanDelayRange, setScanDelayRange] = useState(() => {
     const saved = window.localStorage.getItem("anubis:scanDelayRange");
@@ -372,14 +434,14 @@ function App() {
   const [bootComplete, setBootComplete] = useState(false);
   const [bootPhase, setBootPhase] = useState("loading");
   const [awaitingAuthInput, setAwaitingAuthInput] = useState(false);
+  const [awaitingWebsiteInput, setAwaitingWebsiteInput] = useState(false);
+  const [awaitingModulesInput, setAwaitingModulesInput] = useState(false);
+  const [selectedTarget, setSelectedTarget] = useState("");
   const [authenticatedMember, setAuthenticatedMember] = useState(null);
   const dataRef = useRef({
     members: [],
     scenarios: [],
-    machines: [],
     appConfig: {},
-    selectedScenario: null,
-    selectedMachine: null,
     authenticatedMember: null
   });
   const modeRef = useRef("voice");
@@ -392,6 +454,8 @@ function App() {
   const bootAbortRef = useRef(false);
   const skipIntroRef = useRef(false);
   const awaitingAuthInputRef = useRef(false);
+  const awaitingWebsiteInputRef = useRef(false);
+  const awaitingModulesInputRef = useRef(false);
   const bootPhaseRef = useRef("loading");
   const bootCompleteRef = useRef(false);
   const startVoiceCommandRef = useRef(null);
@@ -417,6 +481,14 @@ function App() {
   useEffect(() => {
     awaitingAuthInputRef.current = awaitingAuthInput;
   }, [awaitingAuthInput]);
+
+  useEffect(() => {
+    awaitingWebsiteInputRef.current = awaitingWebsiteInput;
+  }, [awaitingWebsiteInput]);
+
+  useEffect(() => {
+    awaitingModulesInputRef.current = awaitingModulesInput;
+  }, [awaitingModulesInput]);
 
   useEffect(() => {
     bootPhaseRef.current = bootPhase;
@@ -445,13 +517,16 @@ function App() {
   }, []);
 
   const changeInteractionMode = useCallback((mode) => {
-    const settingsAllowedDuringAuth = awaitingAuthInputRef.current && bootPhaseRef.current === "auth_waiting";
+    const settingsAllowedDuringSetup =
+      awaitingAuthInputRef.current ||
+      awaitingWebsiteInputRef.current ||
+      awaitingModulesInputRef.current;
 
     if (!bootComplete && mode === "reports") {
       return;
     }
 
-    if (!bootComplete && mode === "settings" && !settingsAllowedDuringAuth) {
+    if (!bootComplete && mode === "settings" && !settingsAllowedDuringSetup) {
       return;
     }
 
@@ -571,33 +646,21 @@ function App() {
     [speakVoiceStep]
   );
 
-  const completeBootFlow = useCallback(async () => {
-    await playDialogueStep(getHandoffStep(modeRef.current));
-    await playDialogueStep(getReadyStep(modeRef.current));
-
-    setBootComplete(true);
-    setBootPhase("complete");
-    setAwaitingAuthInput(false);
+  const beginWebsiteSelection = useCallback(() => {
+    setBootPhase("website_waiting");
+    setAwaitingWebsiteInput(true);
     sequenceRunningRef.current = false;
-    setOrbState("idle");
+    setOrbState("thinking");
+    setSubtitle("Authentication complete. What website should I simulate?");
     setChatMessages((messages) => [
-      ...messages,
+      ...messages.map((message) => (message.active ? { ...message, active: false } : message)),
       {
         id: Date.now(),
         role: "system",
-        text: "Authentication and boot sequence complete. Command console ready."
+        text: "Authentication complete. Enter the website to simulate, or press Ctrl+Space."
       }
     ]);
-  }, [playDialogueStep]);
-
-  const runPostAuthSequence = useCallback(
-    async (scenario, machine) => {
-      for (const step of getPostAuthSteps(scenario, machine)) {
-        await playDialogueStep(step, { speak: modeRef.current === "voice" });
-      }
-    },
-    [playDialogueStep]
-  );
+  }, []);
 
   const handleAuthSubmit = useCallback(
     async (phrase, source = "chat") => {
@@ -618,7 +681,7 @@ function App() {
 
       await playDialogueStep(getVerificationStep(source), { speak: source === "voice" });
 
-      const { members, scenarios, machines, appConfig } = dataRef.current;
+      const { members, appConfig } = dataRef.current;
       const phraseRequired = appConfig?.authentication?.phraseRequired !== false;
       const fuzzy = appConfig?.voice?.fuzzyRecognition !== false;
       const retryLimit = Number(appConfig?.voice?.retryLimit) || 2;
@@ -652,10 +715,6 @@ function App() {
           setOrbState("thinking");
           setSubtitle(`Awaiting operator ${source === "voice" ? "voice" : "chat"} input.`);
 
-          if (source === "voice" || modeRef.current === "voice") {
-            await wait(900);
-            startVoiceCommandRef.current?.();
-          }
           return;
         }
 
@@ -665,10 +724,6 @@ function App() {
         setOrbState("thinking");
         setSubtitle(`Awaiting operator ${source === "voice" ? "voice" : "chat"} input.`);
 
-        if (modeRef.current === "voice") {
-          await wait(900);
-          startVoiceCommandRef.current?.();
-        }
         return;
       }
 
@@ -680,34 +735,16 @@ function App() {
         await playDialogueStep(getAuthSuccessStep(resolvedMember.fullName), { speak: source === "voice" });
       }
 
-      const scenario = resolveScenarioForMember(resolvedMember, scenarios);
-      const machine = resolveDefaultMachine(machines, appConfig);
-      dataRef.current.selectedScenario = scenario;
-      dataRef.current.selectedMachine = machine;
-
-      setChatMessages((messages) =>
-        messages.map((message) => (message.active ? { ...message, active: false } : message))
-      );
-
-      await runPostAuthSequence(scenario, machine);
-      await completeBootFlow();
+      beginWebsiteSelection();
     },
-    [completeBootFlow, playDialogueStep, runPostAuthSequence]
+    [beginWebsiteSelection, playDialogueStep]
   );
 
   useEffect(() => {
     handleAuthSubmitRef.current = handleAuthSubmit;
   }, [handleAuthSubmit]);
 
-  const sendOperatorCommand = useCallback(async (prompt, source = "chat") => {
-    if (!bootComplete) return;
-
-    const commandText = prompt.trim();
-    if (!commandText) return;
-
-    const interpreted = interpretOperatorCommand(commandText);
-    const targetUrl = scanTarget;
-    const modules = selectedScanModules.length ? selectedScanModules : interpreted.modules;
+  const executeScan = useCallback(async ({ commandText, targetUrl, modules, source = "chat" }) => {
     const messageId = Date.now();
     const moduleLabels = modules.map(getModuleLabel);
     const moduleLabel = moduleLabels.join(", ");
@@ -772,7 +809,79 @@ function App() {
     if (source !== "voice" || voiceMutedRef.current || !window.speechSynthesis) {
       setOrbState("idle");
     }
-  }, [bootComplete, scanDelayRange.max, scanDelayRange.min, selectedScanModules, speakVoiceStep]);
+  }, [scanDelayRange.max, scanDelayRange.min, speakVoiceStep]);
+
+  const handleWebsiteSubmit = useCallback((website, source = "chat") => {
+    if (!awaitingWebsiteInputRef.current || bootPhaseRef.current !== "website_waiting") return;
+
+    const targetUrl = normalizeTargetInput(website);
+    if (!targetUrl) {
+      setSubtitle("Website not recognized. Enter a hostname or URL.");
+      return;
+    }
+
+    setSelectedTarget(targetUrl);
+    setAwaitingWebsiteInput(false);
+    setAwaitingModulesInput(true);
+    setBootPhase("modules_waiting");
+    setOrbState("thinking");
+    setSubtitle(`Target accepted: ${targetUrl}. What modules should I run?`);
+    setChatMessages((messages) => [
+      ...messages,
+      { id: Date.now(), role: "operator", text: website.trim() },
+      {
+        id: Date.now() + 1,
+        role: "system",
+        text: `Target accepted: ${targetUrl}. Enter modules such as SQL, stored XSS, XXE, or all. Ctrl+Space uses selected Settings modules.`
+      }
+    ]);
+    if (source === "voice") {
+      speakVoiceStep(`Target accepted. What modules should I run?`);
+    }
+  }, [speakVoiceStep]);
+
+  const handleModulesSubmit = useCallback(async (moduleText, source = "chat") => {
+    if (!awaitingModulesInputRef.current || bootPhaseRef.current !== "modules_waiting") return;
+
+    const interpreted = interpretOperatorCommand(moduleText);
+    const requestedAll = /\ball\b/i.test(moduleText);
+    const modules = requestedAll
+      ? scanModuleOptions.map((module) => module.id)
+      : interpreted.modules.filter((moduleId) => moduleId !== "all");
+
+    if (!modules.length) {
+      setSubtitle("Modules not recognized. Try SQL, command, XSS, information, XXE, path, access, smuggling, WebSocket, or all.");
+      return;
+    }
+
+    setAwaitingModulesInput(false);
+    setBootComplete(true);
+    setBootPhase("complete");
+    sequenceRunningRef.current = true;
+    await executeScan({
+      commandText: moduleText.trim(),
+      targetUrl: selectedTarget || defaultScanTarget,
+      modules,
+      source
+    });
+    sequenceRunningRef.current = false;
+  }, [executeScan, selectedTarget]);
+
+  const sendOperatorCommand = useCallback(async (prompt, source = "chat") => {
+    if (!bootComplete) return;
+
+    const commandText = prompt.trim();
+    if (!commandText) return;
+
+    const interpreted = interpretOperatorCommand(commandText);
+    const modules = interpreted.modules.includes("all") ? selectedScanModules : interpreted.modules;
+    await executeScan({
+      commandText,
+      targetUrl: selectedTarget || defaultScanTarget,
+      modules,
+      source
+    });
+  }, [bootComplete, executeScan, selectedScanModules, selectedTarget]);
 
   const submitChatPrompt = useCallback(
     (event) => {
@@ -787,12 +896,33 @@ function App() {
         return;
       }
 
+      if (awaitingWebsiteInput) {
+        handleWebsiteSubmit(prompt, "chat");
+        setChatDraft("");
+        return;
+      }
+
+      if (awaitingModulesInput) {
+        handleModulesSubmit(prompt, "chat");
+        setChatDraft("");
+        return;
+      }
+
       sendOperatorCommand(prompt, "chat");
       setCommandHistory((history) => [prompt, ...history.filter((item) => item !== prompt)].slice(0, 30));
       setHistoryIndex(-1);
       setChatDraft("");
     },
-    [awaitingAuthInput, chatDraft, handleAuthSubmit, sendOperatorCommand]
+    [
+      awaitingAuthInput,
+      awaitingModulesInput,
+      awaitingWebsiteInput,
+      chatDraft,
+      handleAuthSubmit,
+      handleModulesSubmit,
+      handleWebsiteSubmit,
+      sendOperatorCommand
+    ]
   );
 
   const navigateCommandHistory = useCallback((direction) => {
@@ -889,10 +1019,11 @@ function App() {
       return;
     }
 
-    const authCapture =
-      awaitingAuthInputRef.current && bootPhaseRef.current === "auth_waiting";
-    const recordDurationMs = authCapture ? 8000 : 6000;
-    const listenTimeoutMs = authCapture ? 25000 : 12000;
+    const authCapture = awaitingAuthInputRef.current && bootPhaseRef.current === "auth_waiting";
+    const setupCapture =
+      authCapture || awaitingWebsiteInputRef.current || awaitingModulesInputRef.current;
+    const recordDurationMs = setupCapture ? 8000 : 6000;
+    const listenTimeoutMs = setupCapture ? 25000 : 12000;
 
     let stream;
     try {
@@ -915,6 +1046,10 @@ function App() {
     setSubtitle(
       authCapture
         ? `Listening on ${activeMicLabel}. Speak your authentication phrase.`
+        : awaitingWebsiteInputRef.current
+          ? `Listening on ${activeMicLabel}. State the website.`
+          : awaitingModulesInputRef.current
+            ? `Listening on ${activeMicLabel}. State the modules.`
         : `Listening on ${activeMicLabel}. Speak your command.`
     );
     armVoiceTimeout(listenTimeoutMs);
@@ -938,6 +1073,10 @@ function App() {
           setSubtitle(`Understood: ${text}`);
           if (authCapture) {
             await handleAuthSubmitRef.current?.(text, "voice");
+          } else if (awaitingWebsiteInputRef.current) {
+            handleWebsiteSubmit(text, "voice");
+          } else if (awaitingModulesInputRef.current) {
+            await handleModulesSubmit(text, "voice");
           } else {
             sendOperatorCommand(text, "voice");
           }
@@ -1005,6 +1144,10 @@ function App() {
         setSubtitle(`Understood: ${finalTranscript.trim()}`);
         if (authCapture) {
           handleAuthSubmitRef.current?.(finalTranscript.trim(), "voice");
+        } else if (awaitingWebsiteInputRef.current) {
+          handleWebsiteSubmit(finalTranscript.trim(), "voice");
+        } else if (awaitingModulesInputRef.current) {
+          handleModulesSubmit(finalTranscript.trim(), "voice");
         } else {
           sendOperatorCommand(finalTranscript.trim(), "voice");
         }
@@ -1032,7 +1175,17 @@ function App() {
     };
 
     recognition.start();
-  }, [armVoiceTimeout, audioInputDevices, isListening, selectedMicId, sendOperatorCommand, startAudioMeter, stopVoiceInput]);
+  }, [
+    armVoiceTimeout,
+    audioInputDevices,
+    handleModulesSubmit,
+    handleWebsiteSubmit,
+    isListening,
+    selectedMicId,
+    sendOperatorCommand,
+    startAudioMeter,
+    stopVoiceInput
+  ]);
 
   useEffect(() => {
     startVoiceCommandRef.current = startVoiceCommand;
@@ -1041,16 +1194,11 @@ function App() {
   const loadProjectData = useCallback(async () => {
     try {
       const registry = await loadProjectRegistry();
-      const scenario = resolveScenarioForMember(null, registry.scenarios);
-      const machine = resolveDefaultMachine(registry.machines, registry.appConfig);
 
       dataRef.current = {
         members: registry.members,
         scenarios: registry.scenarios,
-        machines: registry.machines,
         appConfig: registry.appConfig,
-        selectedScenario: scenario,
-        selectedMachine: machine,
         authenticatedMember: null
       };
 
@@ -1108,10 +1256,7 @@ function App() {
     const authEnabled = appConfig.authentication?.enabled !== false;
 
     if (!authEnabled) {
-      const scenario = dataRef.current.selectedScenario;
-      const machine = dataRef.current.selectedMachine;
-      await runPostAuthSequence(scenario, machine);
-      await completeBootFlow();
+      beginWebsiteSelection();
       return;
     }
 
@@ -1133,11 +1278,11 @@ function App() {
         role: "system",
         text:
           modeRef.current === "voice"
-            ? "Speak your assigned voice phrase now, press Voice command / Ctrl+A, or switch to Chat mode."
+            ? "Press Ctrl+Space to provide the demo authentication phrase, or switch to Chat mode."
             : "Enter your assigned authentication phrase in the chat prompt below."
       }
     ]);
-  }, [completeBootFlow, playDialogueStep, runPostAuthSequence]);
+  }, [beginWebsiteSelection, playDialogueStep]);
 
   const runFullBootSequence = useCallback(async () => {
     if (sequenceRunningRef.current) return;
@@ -1148,6 +1293,9 @@ function App() {
     setBootPhase("loading");
     setBootComplete(false);
     setAwaitingAuthInput(false);
+    setAwaitingWebsiteInput(false);
+    setAwaitingModulesInput(false);
+    setSelectedTarget("");
     setAuthenticatedMember(null);
     setOrbState("idle");
     setSubtitle("Boot sequence started.");
@@ -1182,18 +1330,6 @@ function App() {
     if (!awaitingAuthInput || bootPhase !== "auth_waiting") return;
     setSubtitle(`Awaiting operator ${interactionMode === "voice" ? "voice" : "chat"} input.`);
   }, [awaitingAuthInput, bootPhase, interactionMode]);
-
-  useEffect(() => {
-    if (!awaitingAuthInput || bootPhase !== "auth_waiting" || interactionMode !== "voice") return undefined;
-
-    const timer = window.setTimeout(() => {
-      if (!awaitingAuthInputRef.current || bootPhaseRef.current !== "auth_waiting") return;
-      if (isListening || recognitionRef.current) return;
-      startVoiceCommandRef.current?.();
-    }, 1000);
-
-    return () => window.clearTimeout(timer);
-  }, [awaitingAuthInput, bootPhase, interactionMode, isListening]);
 
   useEffect(() => {
     let mounted = true;
@@ -1248,6 +1384,10 @@ function App() {
           setSubtitle(`Understood: ${text.trim()}`);
           if (awaitingAuthInputRef.current && bootPhaseRef.current === "auth_waiting") {
             handleAuthSubmitRef.current?.(text.trim(), "voice");
+          } else if (awaitingWebsiteInputRef.current) {
+            handleWebsiteSubmit(text.trim(), "voice");
+          } else if (awaitingModulesInputRef.current) {
+            handleModulesSubmit(text.trim(), "voice");
           } else if (bootCompleteRef.current) {
             sendOperatorCommand(text.trim(), "voice");
           }
@@ -1290,7 +1430,7 @@ function App() {
         }
       }
     });
-  }, [armVoiceTimeout, sendOperatorCommand, stopVoiceInput]);
+  }, [armVoiceTimeout, handleModulesSubmit, handleWebsiteSubmit, sendOperatorCommand, stopVoiceInput]);
 
   useEffect(() => {
     const onKeyDown = async (event) => {
@@ -1307,6 +1447,31 @@ function App() {
         setIntroActive(false);
         setIntroFading(false);
         setAppHidden(false);
+        return;
+      }
+
+      if (event.ctrlKey && event.code === "Space") {
+        event.preventDefault();
+        const demoConfig = dataRef.current.appConfig?.testing || {};
+
+        if (awaitingAuthInputRef.current) {
+          const phrase =
+            demoConfig.demoAuthPhrase ||
+            dataRef.current.members[0]?.displayPhrase ||
+            dataRef.current.members[0]?.fullName;
+          if (phrase) await handleAuthSubmit(phrase, "keybind");
+          return;
+        }
+
+        if (awaitingWebsiteInputRef.current) {
+          handleWebsiteSubmit(demoConfig.demoWebsite || defaultScanTarget, "keybind");
+          return;
+        }
+
+        if (awaitingModulesInputRef.current) {
+          const moduleText = selectedScanModules.map(getModuleLabel).join(", ");
+          await handleModulesSubmit(moduleText, "keybind");
+        }
         return;
       }
 
@@ -1344,7 +1509,16 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [bootComplete, closeWindow, introActive, startVoiceCommand]);
+  }, [
+    bootComplete,
+    closeWindow,
+    handleAuthSubmit,
+    handleModulesSubmit,
+    handleWebsiteSubmit,
+    introActive,
+    selectedScanModules,
+    startVoiceCommand
+  ]);
 
   return (
     <>
@@ -1353,6 +1527,8 @@ function App() {
         hidden={appHidden}
         bootComplete={bootComplete}
         awaitingAuthInput={awaitingAuthInput}
+        awaitingWebsiteInput={awaitingWebsiteInput}
+        awaitingModulesInput={awaitingModulesInput}
         authenticatedMember={authenticatedMember}
         audioInputDevices={audioInputDevices}
         orbState={orbState}
@@ -1416,6 +1592,8 @@ function AppShell({
   hidden,
   bootComplete,
   awaitingAuthInput,
+  awaitingWebsiteInput,
+  awaitingModulesInput,
   authenticatedMember,
   audioInputDevices,
   chatDraft,
@@ -1472,7 +1650,7 @@ function AppShell({
       <ModeToggle
         mode={interactionMode}
         bootComplete={bootComplete}
-        awaitingAuthInput={awaitingAuthInput}
+        setupActive={awaitingAuthInput || awaitingWebsiteInput || awaitingModulesInput}
         onChange={onChangeInteractionMode}
       />
 
@@ -1501,6 +1679,8 @@ function AppShell({
             historyIndex={historyIndex}
             subtitle={subtitle}
             awaitingAuthInput={awaitingAuthInput}
+            awaitingWebsiteInput={awaitingWebsiteInput}
+            awaitingModulesInput={awaitingModulesInput}
             onDraftChange={onChatDraftChange}
             onHistoryNavigate={onCommandHistoryNavigate}
             onSubmit={onChatPromptSubmit}
@@ -1518,6 +1698,8 @@ function AppShell({
             voiceMuted={voiceMuted}
             voiceVolume={voiceVolume}
             awaitingAuthInput={awaitingAuthInput}
+            awaitingWebsiteInput={awaitingWebsiteInput}
+            awaitingModulesInput={awaitingModulesInput}
             bootComplete={bootComplete}
             authenticatedMember={authenticatedMember}
             onMicChange={onMicChange}
@@ -1654,6 +1836,8 @@ function VoicePage({
   voiceMuted,
   voiceVolume,
   awaitingAuthInput,
+  awaitingWebsiteInput,
+  awaitingModulesInput,
   bootComplete,
   authenticatedMember,
   onMicChange,
@@ -1714,7 +1898,15 @@ function VoicePage({
             ].join(" ")}
           >
             <Mic className="mr-2 h-4 w-4" aria-hidden="true" />
-            {isListening ? "Listening" : awaitingAuthInput ? "Auth phrase" : "Voice command"}
+            {isListening
+              ? "Listening"
+              : awaitingAuthInput
+                ? "Auth phrase"
+                : awaitingWebsiteInput
+                  ? "Website"
+                  : awaitingModulesInput
+                    ? "Modules"
+                    : "Voice command"}
           </button>
           <div className="group relative">
             <button
@@ -1758,6 +1950,10 @@ function VoicePage({
                 : "Listening..."
               : awaitingAuthInput
                 ? "Awaiting operator authentication phrase."
+                : awaitingWebsiteInput
+                  ? "What website should I simulate? Press Ctrl+Space."
+                  : awaitingModulesInput
+                    ? "What modules should I run? Press Ctrl+Space."
                 : bootComplete
                   ? "Awaiting voice command."
                   : "Boot sequence in progress.")}
@@ -1796,6 +1992,8 @@ function ChatPage({
   messages,
   subtitle,
   awaitingAuthInput,
+  awaitingWebsiteInput,
+  awaitingModulesInput,
   onDraftChange,
   onHistoryNavigate,
   onSubmit
@@ -1867,7 +2065,15 @@ function ChatPage({
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
             onKeyDown={handlePromptKeyDown}
-            placeholder={awaitingAuthInput ? "Enter your assigned authentication phrase..." : "Enter prompt or text..."}
+            placeholder={
+              awaitingAuthInput
+                ? "Enter your assigned authentication phrase..."
+                : awaitingWebsiteInput
+                  ? "Enter website hostname or URL..."
+                  : awaitingModulesInput
+                    ? "Enter modules: SQL, stored XSS, XXE, all..."
+                    : "Enter prompt or text..."
+            }
             rows={2}
             className="min-h-[52px] flex-1 resize-none rounded-md border border-white/10 bg-[#05030c]/80 px-4 py-2 text-sm leading-relaxed text-anubis-text outline-none transition placeholder:text-anubis-faint focus:border-anubis-bright/45 focus:ring-2 focus:ring-anubis-violet/20"
           />
@@ -1875,7 +2081,7 @@ function ChatPage({
             type="submit"
             className="min-w-[116px] rounded-md border border-anubis-bright/25 bg-anubis-violet/20 px-5 text-xs font-semibold uppercase tracking-[.2em] text-anubis-text transition hover:bg-anubis-violet/30 hover:text-white"
           >
-            {awaitingAuthInput ? "Authenticate" : "Send"}
+            {awaitingAuthInput ? "Authenticate" : awaitingWebsiteInput ? "Set target" : awaitingModulesInput ? "Run modules" : "Send"}
           </button>
         </div>
         <div className="mt-3 flex items-center justify-between gap-3 text-xs tracking-[.12em] text-anubis-faint">
@@ -2003,14 +2209,14 @@ function ReportMetric({ label, value }) {
   );
 }
 
-function ModeToggle({ mode, bootComplete, awaitingAuthInput, onChange }) {
+function ModeToggle({ mode, bootComplete, setupActive, onChange }) {
   return (
     <div className="absolute left-7 top-[22px] z-[9999] flex rounded-full border border-anubis-violet/20 bg-[#120a23]/30 p-1 backdrop-blur">
       {["voice", "chat", "reports", "settings"].map((item) => {
         const active = mode === item;
         const locked =
           (!bootComplete && item === "reports") ||
-          (!bootComplete && item === "settings" && !awaitingAuthInput);
+          (!bootComplete && item === "settings" && !setupActive);
 
         return (
           <button
