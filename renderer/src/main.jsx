@@ -971,7 +971,14 @@ function App() {
         { id: Date.now() + Math.random(), role: "system", text: `Report ready for ${targetUrl}.` }
       ]);
     }
-    if (!isNarrationEnabled()) {
+
+    const operatorName = dataRef.current.authenticatedMember?.fullName || "Operator";
+    const helpPrompt = `How can I help you, ${operatorName}?`;
+    setBootPhase("function_ready");
+    setSubtitle(helpPrompt);
+    if (isNarrationEnabled()) {
+      await speakNarration(helpPrompt, "idle");
+    } else {
       setOrbState("idle");
     }
   }, [isNarrationEnabled, scanDelayRange.max, scanDelayRange.min, speakNarration]);
@@ -1407,6 +1414,50 @@ function App() {
     startVoiceCommand();
   }, [authenticatedMember, bootComplete, enterFunctionReadyState, startVoiceCommand, stopVoiceInput]);
 
+  const logoutOperator = useCallback(async () => {
+    if (!dataRef.current.authenticatedMember || sequenceRunningRef.current) return;
+
+    sequenceRunningRef.current = true;
+    window.electronAPI?.stopNativeVoice?.();
+    stopVoiceInput();
+    stopSpeech();
+
+    dataRef.current.authenticatedMember = null;
+    setAuthenticatedMember(null);
+    setBootComplete(false);
+    setAwaitingAuthInput(false);
+    setAwaitingWebsiteInput(false);
+    setAwaitingModulesInput(false);
+    awaitingAuthInputRef.current = false;
+    awaitingWebsiteInputRef.current = false;
+    awaitingModulesInputRef.current = false;
+    pendingAttackProfileRef.current = null;
+    setSelectedTarget("");
+    setVoiceTranscript("");
+    setVoiceError("");
+    modeRef.current = "voice";
+    setInteractionMode("voice");
+    setBootPhase("auth_prompt");
+    bootPhaseRef.current = "auth_prompt";
+
+    const prompt = "Please identify yourself using your assigned voice phrase.";
+    setOrbState("speaking");
+    setSubtitle(prompt);
+    if (isNarrationEnabled()) {
+      await speakNarration(prompt, "thinking");
+    } else {
+      await wait(1200);
+    }
+
+    setBootPhase("auth_waiting");
+    bootPhaseRef.current = "auth_waiting";
+    setAwaitingAuthInput(true);
+    awaitingAuthInputRef.current = true;
+    sequenceRunningRef.current = false;
+    setOrbState("thinking");
+    setSubtitle("Awaiting operator voice input.");
+  }, [isNarrationEnabled, speakNarration, stopVoiceInput]);
+
   const loadProjectData = useCallback(async () => {
     try {
       const registry = await loadProjectRegistry();
@@ -1680,6 +1731,19 @@ function App() {
 
       if (modeRef.current !== "voice") return;
 
+      if (
+        key === "l" &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        !isTextInput &&
+        dataRef.current.authenticatedMember
+      ) {
+        event.preventDefault();
+        await logoutOperator();
+        return;
+      }
+
       const authOperator = authOperatorKeys[key];
       if (
         authOperator &&
@@ -1797,6 +1861,7 @@ function App() {
     handleModulesSubmit,
     handleWebsiteSubmit,
     introActive,
+    logoutOperator,
     presentProjectIntroduction,
     selectedScanModules,
     startVoiceCommand

@@ -13,7 +13,7 @@ export function getAuthPromptSteps(mode) {
       state: "speaking",
       text:
         mode === "voice"
-          ? "Press your assigned operator key."
+          ? "Please identify yourself using your assigned voice phrase."
           : "Please identify yourself using the chat authentication prompt.",
       delay: 1800
     },
@@ -26,7 +26,7 @@ export function getVerificationStep(mode) {
     state: "speaking",
     text:
       mode === "keybind"
-        ? "Operator key received. Verifying operator identity."
+        ? "Identity received. Verifying operator signature."
         : `${mode === "voice" ? "Voice" : "Chat"} identity pattern received. Verifying operator signature.`,
     delay: 2400
   };
