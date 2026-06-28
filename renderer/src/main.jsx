@@ -15,6 +15,13 @@ import { ensureVoicesLoaded, speakCalm, stopSpeech } from "./lib/tts.js";
 import "./styles.css";
 
 const defaultScanTarget = "shopnest.com";
+const projectAbstract = [
+  "This graduation project presents the design, development, and implementation of ANUBIS, an intelligent desktop-based cybersecurity assistant designed to support security testing operations through natural operator interaction and real-time system monitoring. The system is implemented as an Electron application with a React-based user interface that provides both voice and chat interaction modes, allowing the operator to communicate with the platform using flexible command input while observing execution status through a dynamic visual interface.",
+  "The system architecture is divided into two main layers: the client interaction layer and the execution communication layer. The client layer is responsible for rendering the graphical interface, managing the cinematic startup sequence, displaying status updates, processing operator input, handling speech recognition, and controlling application windows through a secure preload bridge. The execution layer is connected through a WebSocket channel to a backend service that receives interpreted commands, starts testing runs, returns progress events, and reports final execution results.",
+  "The primary purpose of this project is to simplify the interaction between the security operator and multiple testing modules by transforming natural-language commands into structured execution requests. The system extracts target URLs, maps spoken or typed phrases into security modules, and supports scenario-driven workflows that include vulnerability categories such as SQL Injection, Cross-Site Scripting, OS Command Injection, XXE, Path Traversal, Access Control, HTTP Request Smuggling, and WebSocket Analysis.",
+  "The project demonstrates a practical integration of desktop application engineering, human-computer interaction, and cybersecurity task orchestration. It provides a clear operational interface, real-time feedback, and a modular foundation that can be expanded in the future to support richer backend automation, stronger analytics, and more advanced intelligent assistance capabilities."
+];
+
 const scanModuleOptions = [
   { id: "sqli", label: "SQL Injection" },
   { id: "osci", label: "Command Injection" },
@@ -536,8 +543,16 @@ function App() {
 
     if (!sequenceRunningRef.current && (bootComplete || mode === "settings")) {
       setOrbState("idle");
-      const label = mode === "voice" ? "Voice" : mode === "chat" ? "Chat" : mode === "reports" ? "Reports" : "Settings";
-      setSubtitle(`${label} mode active.`);
+      if (
+        mode === "voice" &&
+        bootPhaseRef.current === "function_ready" &&
+        dataRef.current.authenticatedMember
+      ) {
+        setSubtitle(`How can I help you, ${dataRef.current.authenticatedMember.fullName}?`);
+      } else {
+        const label = mode === "voice" ? "Voice" : mode === "chat" ? "Chat" : mode === "reports" ? "Reports" : "Settings";
+        setSubtitle(`${label} mode active.`);
+      }
     }
   }, [bootComplete]);
 
@@ -685,6 +700,30 @@ function App() {
     }
   }, [isNarrationEnabled, speakNarration]);
 
+  const enterFunctionReadyState = useCallback((member) => {
+    const operator = member || dataRef.current.authenticatedMember;
+    const operatorName = operator?.fullName || "Operator";
+    const prompt = `How can I help you, ${operatorName}?`;
+
+    setBootComplete(true);
+    setBootPhase("function_ready");
+    setAwaitingAuthInput(false);
+    setAwaitingWebsiteInput(false);
+    setAwaitingModulesInput(false);
+    setSelectedTarget("");
+    sequenceRunningRef.current = false;
+    modeRef.current = "voice";
+    setInteractionMode("voice");
+    setOrbState("speaking");
+    setSubtitle(prompt);
+
+    if (isNarrationEnabled()) {
+      void speakNarration(prompt, "idle");
+    } else {
+      setOrbState("idle");
+    }
+  }, [isNarrationEnabled, speakNarration]);
+
   const handleAuthSubmit = useCallback(
     async (phrase, source = "chat") => {
       if (!awaitingAuthInputRef.current || bootPhaseRef.current !== "auth_waiting") return;
@@ -696,11 +735,13 @@ function App() {
       setBootPhase("auth_verifying");
       sequenceRunningRef.current = true;
 
-      setChatMessages((messages) => [
-        ...messages,
-        { id: Date.now(), role: "operator", text: trimmed },
-        { id: Date.now() + 1, role: "system", text: "Verifying operator identity signature.", active: true }
-      ]);
+      if (source === "chat") {
+        setChatMessages((messages) => [
+          ...messages,
+          { id: Date.now(), role: "operator", text: trimmed },
+          { id: Date.now() + 1, role: "system", text: "Verifying operator identity signature.", active: true }
+        ]);
+      }
 
       await playDialogueStep(getVerificationStep(source), { speak: true });
 
@@ -758,9 +799,9 @@ function App() {
         await playDialogueStep(getAuthSuccessStep(resolvedMember.fullName), { speak: true });
       }
 
-      beginWebsiteSelection();
+      enterFunctionReadyState(resolvedMember);
     },
-    [beginWebsiteSelection, playDialogueStep]
+    [enterFunctionReadyState, playDialogueStep]
   );
 
   useEffect(() => {
@@ -1221,7 +1262,6 @@ function App() {
       window.electronAPI?.stopNativeVoice?.();
       stopVoiceInput();
       stopSpeech();
-      setBootComplete(false);
       setAwaitingAuthInput(false);
       setAwaitingModulesInput(false);
       setSelectedTarget("");
@@ -1229,12 +1269,12 @@ function App() {
       setVoiceError("");
       modeRef.current = "voice";
       setInteractionMode("voice");
-      beginWebsiteSelection();
+      enterFunctionReadyState(authenticatedMember);
       return;
     }
 
     startVoiceCommand();
-  }, [authenticatedMember, beginWebsiteSelection, bootComplete, startVoiceCommand, stopVoiceInput]);
+  }, [authenticatedMember, bootComplete, enterFunctionReadyState, startVoiceCommand, stopVoiceInput]);
 
   const loadProjectData = useCallback(async () => {
     try {
@@ -1301,7 +1341,10 @@ function App() {
     const authEnabled = appConfig.authentication?.enabled !== false;
 
     if (!authEnabled) {
-      beginWebsiteSelection();
+      const operator = { fullName: "Operator" };
+      dataRef.current.authenticatedMember = operator;
+      setAuthenticatedMember(operator);
+      enterFunctionReadyState(operator);
       return;
     }
 
@@ -1316,18 +1359,17 @@ function App() {
     setOrbState("thinking");
     setSubtitle(`Awaiting operator ${modeRef.current === "voice" ? "voice" : "chat"} input.`);
 
-    setChatMessages((messages) => [
-      ...messages,
-      {
-        id: Date.now(),
-        role: "system",
-        text:
-          modeRef.current === "voice"
-            ? "Press Ctrl+Space to provide the demo authentication phrase, or switch to Chat mode."
-            : "Enter your assigned authentication phrase in the chat prompt below."
-      }
-    ]);
-  }, [beginWebsiteSelection, playDialogueStep]);
+    if (modeRef.current === "chat") {
+      setChatMessages((messages) => [
+        ...messages,
+        {
+          id: Date.now(),
+          role: "system",
+          text: "Enter your assigned authentication phrase in the chat prompt below."
+        }
+      ]);
+    }
+  }, [enterFunctionReadyState, playDialogueStep]);
 
   const runFullBootSequence = useCallback(async () => {
     if (sequenceRunningRef.current) return;
@@ -1499,6 +1541,28 @@ function App() {
         return;
       }
 
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeWindow();
+        return;
+      }
+
+      if (modeRef.current !== "voice") return;
+
+      if (
+        event.key === "ArrowUp" &&
+        bootPhaseRef.current === "function_ready" &&
+        dataRef.current.authenticatedMember
+      ) {
+        event.preventDefault();
+        stopSpeech();
+        modeRef.current = "introduction";
+        setInteractionMode("introduction");
+        setOrbState("idle");
+        setSubtitle("ANUBIS project introduction.");
+        return;
+      }
+
       if (event.ctrlKey && event.code === "Space") {
         event.preventDefault();
         const demoConfig = dataRef.current.appConfig?.testing || {};
@@ -1550,10 +1614,6 @@ function App() {
         setSubtitle("Manual idle state activated.");
       }
 
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeWindow();
-      }
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -1707,7 +1767,9 @@ function AppShell({
 
       <main className="relative z-[2] grid h-full w-full grid-rows-[1fr_auto] px-[4vw] pb-[3vh] pt-[4vh]">
         <div className="min-h-0 overflow-hidden">
-        {interactionMode === "settings" ? (
+        {interactionMode === "introduction" ? (
+          <IntroductionPage onBack={() => onChangeInteractionMode("voice")} />
+        ) : interactionMode === "settings" ? (
           <SettingsPage
             audioInputDevices={audioInputDevices}
             selectedMicId={selectedMicId}
@@ -1756,6 +1818,35 @@ function AppShell({
         </div>
         <Subtitle text={subtitle} />
       </main>
+    </div>
+  );
+}
+
+function IntroductionPage({ onBack }) {
+  return (
+    <div className="chat-scrollbar mx-auto h-full w-[min(980px,94vw)] overflow-y-auto pb-10 pt-20">
+      <header className="flex items-end justify-between gap-6 border-b border-anubis-violet/20 pb-5">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[.28em] text-anubis-faint">ANUBIS PROJECT</div>
+          <h1 className="mt-2 text-2xl font-semibold tracking-[.08em] text-anubis-text">Introduction</h1>
+        </div>
+        <button
+          type="button"
+          onClick={onBack}
+          className="rounded-full border border-anubis-bright/25 bg-anubis-violet/15 px-5 py-2 text-xs font-semibold uppercase tracking-[.18em] text-anubis-text transition hover:bg-anubis-violet/25 hover:text-white"
+        >
+          Return
+        </button>
+      </header>
+
+      <article className="mt-6 rounded-xl border border-anubis-violet/15 bg-[#080512]/65 p-7 shadow-panel backdrop-blur">
+        <div className="mb-5 text-xs font-semibold uppercase tracking-[.24em] text-anubis-bright">Abstract</div>
+        <div className="space-y-5 text-[15px] leading-8 tracking-[.02em] text-anubis-muted">
+          {projectAbstract.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+        </div>
+      </article>
     </div>
   );
 }
@@ -1951,6 +2042,12 @@ function VoicePage({
             </div>
           </div>
         </div>
+        {authenticatedMember && bootComplete ? (
+          <div className="rounded-full border border-anubis-violet/20 bg-[#100a1e]/55 px-4 py-2 text-[11px] font-semibold uppercase tracking-[.18em] text-anubis-faint">
+            <span className="mr-2 text-anubis-bright">↑</span>
+            Project introduction
+          </div>
+        ) : null}
         {authenticatedMember ? (
           <div className="text-center text-xs uppercase tracking-[.16em] text-anubis-faint">
             Operator: {authenticatedMember.fullName}
