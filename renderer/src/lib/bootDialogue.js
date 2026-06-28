@@ -2,7 +2,6 @@ export const INTRO_WORDS = ["WELCOME", "TO", "ANUBIS"];
 
 export const BOOT_NARRATION = [
   { state: "speaking", text: "WELCOME TO ANUBIS.", delay: 2200 },
-  { state: "speaking", text: "HOW CAN I HELP YOU.", delay: 5000 },
   { state: "thinking", text: "Loading scenario registry and target systems.", delay: 2200 },
   { state: "speaking", text: "I am ANUBIS.", delay: 1800 },
   { state: "speaking", text: "System standby. Awaiting operator authentication.", delay: 2200 },
