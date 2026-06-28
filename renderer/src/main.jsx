@@ -15,8 +15,15 @@ import { ensureVoicesLoaded, speakCalm, stopSpeech } from "./lib/tts.js";
 import "./styles.css";
 
 const defaultScanTarget = "shopnest.com";
-const projectIntroductionSummary =
-  "ANUBIS is our graduation project: an intelligent desktop cybersecurity assistant built with Electron and React. It allows security operators to use voice or chat to select a website and security testing modules, while the orb provides clear, real-time execution feedback. A secure preload bridge separates the interface from privileged desktop operations, and a WebSocket-ready execution layer supports backend progress and results. ANUBIS combines cybersecurity orchestration, desktop engineering, and human-computer interaction in a modular platform designed for future automation and advanced analytics.";
+const projectIntroductionSentences = [
+  "ANUBIS is our graduation project: an intelligent desktop cybersecurity assistant.",
+  "Built with Electron and React, it supports natural operator interaction through voice and chat.",
+  "Operators select a website and security modules while the orb shows execution status in real time.",
+  "A secure preload bridge separates the interface from privileged desktop operations.",
+  "A WebSocket-ready execution layer supports backend progress events and final results.",
+  "The platform combines cybersecurity orchestration, desktop engineering, and human-computer interaction.",
+  "Its modular design supports future automation, analytics, and more advanced assistance."
+];
 
 const scanModuleOptions = [
   { id: "sqli", label: "SQL Injection" },
@@ -717,6 +724,31 @@ function App() {
       void speakNarration(prompt, "idle");
     } else {
       setOrbState("idle");
+    }
+  }, [isNarrationEnabled, speakNarration]);
+
+  const presentProjectIntroduction = useCallback(async () => {
+    if (sequenceRunningRef.current) return;
+
+    sequenceRunningRef.current = true;
+    setOrbState("speaking");
+
+    try {
+      for (const [index, sentence] of projectIntroductionSentences.entries()) {
+        setSubtitle(sentence);
+
+        if (isNarrationEnabled()) {
+          const finalState = index === projectIntroductionSentences.length - 1 ? "idle" : "speaking";
+          await speakNarration(sentence, finalState);
+        } else {
+          await wait(2200);
+        }
+      }
+    } finally {
+      sequenceRunningRef.current = false;
+      setOrbState("idle");
+      const operatorName = dataRef.current.authenticatedMember?.fullName || "Operator";
+      setSubtitle(`How can I help you, ${operatorName}?`);
     }
   }, [isNarrationEnabled, speakNarration]);
 
@@ -1552,12 +1584,7 @@ function App() {
       ) {
         event.preventDefault();
         stopSpeech();
-        setSubtitle(projectIntroductionSummary);
-        if (isNarrationEnabled()) {
-          void speakNarration(projectIntroductionSummary, "idle");
-        } else {
-          setOrbState("idle");
-        }
+        await presentProjectIntroduction();
         return;
       }
 
@@ -1622,10 +1649,9 @@ function App() {
     handleAuthSubmit,
     handleModulesSubmit,
     handleWebsiteSubmit,
-    isNarrationEnabled,
     introActive,
+    presentProjectIntroduction,
     selectedScanModules,
-    speakNarration,
     startVoiceCommand
   ]);
 
@@ -2368,8 +2394,8 @@ function Orb({ state }) {
 function Subtitle({ text }) {
   return (
     <section className="flex w-full justify-center pb-[1vh] pt-[1.5vh]" aria-live="polite" aria-atomic="true">
-      <div className="flex min-h-[84px] w-[min(860px,92vw)] items-center justify-center rounded-full border border-anubis-violet/25 bg-[linear-gradient(180deg,rgba(16,10,30,.72),rgba(10,6,22,.48))] px-8 py-[22px] shadow-[0_0_32px_rgba(155,108,255,.12)] backdrop-blur-md">
-        <p className="text-center text-[clamp(17px,1.25vw,24px)] font-medium leading-relaxed tracking-[.03em] text-anubis-text [text-shadow:0_0_18px_rgba(196,166,255,.16)]">
+      <div className="flex h-[84px] w-[min(860px,92vw)] items-center justify-center overflow-hidden rounded-full border border-anubis-violet/25 bg-[linear-gradient(180deg,rgba(16,10,30,.72),rgba(10,6,22,.48))] px-8 py-3 shadow-[0_0_32px_rgba(155,108,255,.12)] backdrop-blur-md">
+        <p className="overflow-hidden text-center text-[clamp(14px,1vw,18px)] font-medium leading-snug tracking-[.03em] text-anubis-text [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] [text-shadow:0_0_18px_rgba(196,166,255,.16)]">
           {text}
         </p>
       </div>
