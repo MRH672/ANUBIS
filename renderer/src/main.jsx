@@ -52,7 +52,7 @@ const digitAttackProfiles = {
 };
 
 const authOperatorKeys = {
-  "~": "Hassan Hesham",
+  "`": "Hassan Hesham",
   q: "Marceleno",
   w: "Aya",
   e: "Alyaa",
