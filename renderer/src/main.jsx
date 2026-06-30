@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Mic, Volume2, VolumeX } from "lucide-react";
+import { Square, Volume2, VolumeX } from "lucide-react";
 import {
   BOOT_NARRATION,
   getAuthFailureStep,
@@ -495,6 +495,7 @@ function App() {
   const micStreamRef = useRef(null);
   const recognitionRef = useRef(null);
   const sequenceRunningRef = useRef(false);
+  const cancelRequestedRef = useRef(false);
   const authRetriesRef = useRef(0);
   const bootAbortRef = useRef(false);
   const skipIntroRef = useRef(false);
@@ -774,11 +775,13 @@ function App() {
   const presentProjectIntroduction = useCallback(async () => {
     if (sequenceRunningRef.current) return;
 
+    cancelRequestedRef.current = false;
     sequenceRunningRef.current = true;
     setOrbState("speaking");
 
     try {
       for (const [index, sentence] of projectIntroductionSentences.entries()) {
+        if (cancelRequestedRef.current) return;
         setSubtitle(sentence);
 
         if (isNarrationEnabled()) {
@@ -787,12 +790,16 @@ function App() {
         } else {
           await wait(2200);
         }
+
+        if (cancelRequestedRef.current) return;
       }
     } finally {
       sequenceRunningRef.current = false;
       setOrbState("idle");
-      const operatorName = dataRef.current.authenticatedMember?.fullName || "Operator";
-      setSubtitle(`How can I help you, ${operatorName}?`);
+      if (!cancelRequestedRef.current) {
+        const operatorName = dataRef.current.authenticatedMember?.fullName || "Operator";
+        setSubtitle(`How can I help you, ${operatorName}?`);
+      }
     }
   }, [isNarrationEnabled, speakNarration]);
 
@@ -887,6 +894,7 @@ function App() {
     source = "chat",
     memberName = ""
   }) => {
+    cancelRequestedRef.current = false;
     const messageId = Date.now();
     const moduleLabels = modules.map(getModuleLabel);
     const moduleLabel = moduleLabels.join(", ");
@@ -937,6 +945,7 @@ function App() {
         ];
 
     for (const [index, step] of steps.entries()) {
+      if (cancelRequestedRef.current) return null;
       const activeId = stepIdBase + index;
       if (source === "chat") {
         setChatMessages((messages) => [
@@ -951,6 +960,7 @@ function App() {
       } else {
         await wait(randomDelay(scanDelayRange.min, scanDelayRange.max));
       }
+      if (cancelRequestedRef.current) return null;
       if (source === "chat") {
         setChatMessages((messages) =>
           messages.map((message) => (message.id === activeId ? { ...message, active: false } : message))
@@ -963,6 +973,7 @@ function App() {
         messages.map((message) => (message.id === messageId + 1 ? { ...message, active: false } : message))
       );
     }
+    if (cancelRequestedRef.current) return null;
     const report = buildScanReport({ modules, targetUrl, memberName });
     setLatestReport(report);
     modeRef.current = "reports";
@@ -993,6 +1004,7 @@ function App() {
     } else {
       setOrbState("idle");
     }
+    return report;
   }, [isNarrationEnabled, scanDelayRange.max, scanDelayRange.min, speakNarration]);
 
   const handleWebsiteSubmit = useCallback(async (website, source = "chat") => {
@@ -1011,6 +1023,7 @@ function App() {
     awaitingWebsiteInputRef.current = false;
 
     if (attackProfile) {
+      cancelRequestedRef.current = false;
       setAwaitingModulesInput(false);
       setBootComplete(true);
       setBootPhase("attacking");
@@ -1020,6 +1033,12 @@ function App() {
       setSubtitle(announcement);
       if (source !== "chat" && isNarrationEnabled()) {
         await speakNarration(announcement, "thinking");
+      }
+      if (cancelRequestedRef.current) {
+        pendingAttackProfileRef.current = null;
+        sequenceRunningRef.current = false;
+        setBootPhase("function_ready");
+        return;
       }
 
       await executeScan({
@@ -1407,24 +1426,31 @@ function App() {
     startVoiceCommandRef.current = startVoiceCommand;
   }, [startVoiceCommand]);
 
-  const handleVoicePrimaryAction = useCallback(() => {
-    if (authenticatedMember && bootComplete && !sequenceRunningRef.current) {
-      window.electronAPI?.stopNativeVoice?.();
-      stopVoiceInput();
-      stopSpeech();
-      setAwaitingAuthInput(false);
-      setAwaitingModulesInput(false);
-      setSelectedTarget("");
-      setVoiceTranscript("");
-      setVoiceError("");
-      modeRef.current = "voice";
-      setInteractionMode("voice");
-      enterFunctionReadyState(authenticatedMember);
-      return;
-    }
+  const handleVoiceStop = useCallback(() => {
+    cancelRequestedRef.current = true;
+    window.electronAPI?.stopNativeVoice?.();
+    stopVoiceInput();
+    stopSpeech();
+    sequenceRunningRef.current = false;
+    pendingAttackProfileRef.current = null;
+    setAwaitingWebsiteInput(false);
+    setAwaitingModulesInput(false);
+    awaitingWebsiteInputRef.current = false;
+    awaitingModulesInputRef.current = false;
+    setSelectedTarget("");
+    setVoiceTranscript("");
+    setVoiceError("");
+    setOrbState("idle");
 
-    startVoiceCommand();
-  }, [authenticatedMember, bootComplete, enterFunctionReadyState, startVoiceCommand, stopVoiceInput]);
+    if (dataRef.current.authenticatedMember) {
+      setBootComplete(true);
+      setBootPhase("function_ready");
+      bootPhaseRef.current = "function_ready";
+      setSubtitle("Operation stopped.");
+    } else {
+      setSubtitle("Voice input stopped.");
+    }
+  }, [stopVoiceInput]);
 
   const logoutOperator = useCallback(async (targetMode = "voice") => {
     if (!dataRef.current.authenticatedMember || sequenceRunningRef.current) return;
@@ -1981,7 +2007,7 @@ function App() {
         onClose={closeWindow}
         onMaximize={maximizeWindow}
         onMinimize={minimizeWindow}
-        onVoiceCommandStart={handleVoicePrimaryAction}
+        onVoiceStop={handleVoiceStop}
       />
     </>
   );
@@ -2047,7 +2073,7 @@ function AppShell({
   onClose,
   onMaximize,
   onMinimize,
-  onVoiceCommandStart
+  onVoiceStop
 }) {
   return (
     <div
@@ -2123,7 +2149,7 @@ function AppShell({
             authenticatedMember={authenticatedMember}
             onVoiceMuteToggle={onVoiceMuteToggle}
             onVoiceVolumeChange={onVoiceVolumeChange}
-            onVoiceCommandStart={onVoiceCommandStart}
+            onVoiceStop={onVoiceStop}
           />
         )}
         </div>
@@ -2255,7 +2281,7 @@ function VoicePage({
   awaitingModulesInput,
   bootComplete,
   authenticatedMember,
-  onVoiceCommandStart,
+  onVoiceStop,
   onVoiceMuteToggle,
   onVoiceVolumeChange
 }) {
@@ -2269,26 +2295,11 @@ function VoicePage({
         <div className="flex flex-wrap items-center justify-center gap-3">
           <button
             type="button"
-            onClick={onVoiceCommandStart}
-            className={[
-              "flex h-10 items-center rounded-full border px-5 text-xs font-semibold uppercase tracking-[.2em] transition",
-              isListening
-                ? "border-anubis-bright/40 bg-anubis-violet/25 text-white"
-                : "border-anubis-violet/20 bg-[#120a23]/40 text-anubis-muted hover:bg-anubis-violet/15 hover:text-anubis-bright"
-            ].join(" ")}
+            onClick={onVoiceStop}
+            className="flex h-10 items-center rounded-full border border-red-300/30 bg-red-500/10 px-5 text-xs font-semibold uppercase tracking-[.2em] text-red-100 transition hover:border-red-200/50 hover:bg-red-500/20 hover:text-white"
           >
-            <Mic className="mr-2 h-4 w-4" aria-hidden="true" />
-            {isListening
-              ? "Listening"
-              : awaitingAuthInput
-                ? "Auth phrase"
-                : awaitingWebsiteInput
-                  ? "Website"
-                  : awaitingModulesInput
-                    ? "Modules"
-                    : authenticatedMember && bootComplete
-                      ? "Start again"
-                      : "Voice command"}
+            <Square className="mr-2 h-3.5 w-3.5 fill-current" aria-hidden="true" />
+            Stop
           </button>
           <div className="group relative">
             <button
