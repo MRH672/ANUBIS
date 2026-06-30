@@ -1,0 +1,41 @@
+id: shopnest-stored-xss
+
+info:
+  name: ShopNest Stored XSS
+  author: codex
+  severity: high
+  description: Checks stored feedback rendering using a marker payload.
+  tags: xss,stored,shopnest
+
+http:
+  - raw:
+      - |
+        POST /login HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: scanner
+        Content-Type: application/x-www-form-urlencoded
+        Accept: */*
+
+        username=admin&password=admin123&next=/feedback
+      - |
+        POST /feedback/ HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: scanner
+        Content-Type: application/x-www-form-urlencoded
+        Accept: */*
+
+        name=nuclei&comment=%3Cscript%3E%2F%2ASHOPNEST_STORED_XSS_97531%2A%2F%3C%2Fscript%3E
+    cookie-reuse: true
+    redirects: true
+    max-redirects: 2
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "Feedback saved."
+          - "<script>/*SHOPNEST_STORED_XSS_97531*/</script>"
+        condition: and

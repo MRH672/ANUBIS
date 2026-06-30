@@ -1,0 +1,29 @@
+id: shopnest-dom-xss
+
+info:
+  name: ShopNest DOM XSS
+  author: codex
+  severity: medium
+  description: Checks unsafe fragment rendering in the feedback preview.
+  tags: xss,dom,shopnest
+
+http:
+  - raw:
+      - |
+        GET /feedback/ HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: scanner
+        Accept: */*
+    redirects: true
+    max-redirects: 2
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "preview.innerHTML = decodeURIComponent(location.hash.slice(1)"
+          - "id=\"hash-preview\""
+        condition: and

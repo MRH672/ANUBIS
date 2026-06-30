@@ -1,0 +1,41 @@
+id: shopnest-xml-entity
+
+info:
+  name: ShopNest XML Entity Expansion
+  author: codex
+  severity: medium
+  description: Checks XML import handling for local entity expansion.
+  tags: xml,xxe,shopnest
+
+http:
+  - raw:
+      - |
+        POST /login HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: scanner
+        Content-Type: application/x-www-form-urlencoded
+        Accept: */*
+
+        username=admin&password=admin123&next=/admin/import
+      - |
+        POST /admin/import/ HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: scanner
+        Content-Type: application/x-www-form-urlencoded
+        Accept: */*
+
+        import_data=%3C%21DOCTYPE%20order%20%5B%3C%21ENTITY%20marker%20%22SHOPNEST_XML_ENTITY_86420%22%3E%5D%3E%3Corder%3E%3Cid%3E%26marker%3B%3C%2Fid%3E%3Cnote%3Eentity%20test%3C%2Fnote%3E%3C%2Forder%3E
+    cookie-reuse: true
+    redirects: true
+    max-redirects: 2
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "Order: SHOPNEST_XML_ENTITY_86420"
+          - "Note: entity test"
+        condition: and

@@ -1,0 +1,39 @@
+id: shopnest-order-access
+
+info:
+  name: ShopNest Order Detail Access Control
+  author: codex
+  severity: high
+  description: Checks whether one signed-in customer can access another customer's order detail.
+  tags: access,authz,idor,shopnest
+
+http:
+  - raw:
+      - |
+        POST /login HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: scanner
+        Content-Type: application/x-www-form-urlencoded
+        Accept: */*
+
+        username=john_doe&password=john1234&next=/account
+      - |
+        GET /orders/detail/?order=1002 HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: scanner
+        Accept: */*
+    cookie-reuse: true
+    redirects: true
+    max-redirects: 2
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "Order #1002"
+          - "alice@example.com"
+          - "Stainless Steel Water Bottle"
+        condition: and

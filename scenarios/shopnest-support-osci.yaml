@@ -1,0 +1,29 @@
+id: shopnest-support-osci
+
+info:
+  name: ShopNest Shipment Support OS Command Injection
+  author: codex
+  severity: high
+  description: Checks shipment lookup command handling using a marker.
+  tags: osci,cmdi,shopnest
+
+http:
+  - raw:
+      - |
+        GET /orders/track/?tracking=SHOP-1001%3Bprintf%20SHOPNEST_OSCI_MARKER_24680 HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: scanner
+        Accept: */*
+    redirects: true
+    max-redirects: 2
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "Shipment lookup for SHOP-1001"
+          - "SHOPNEST_OSCI_MARKER_24680"
+        condition: and

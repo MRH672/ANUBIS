@@ -1,0 +1,39 @@
+id: shopnest-report-access
+
+info:
+  name: ShopNest Reports Access Control
+  author: codex
+  severity: high
+  description: Checks whether a non-admin user can access operational reporting data.
+  tags: access,authz,shopnest
+
+http:
+  - raw:
+      - |
+        POST /login HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: scanner
+        Content-Type: application/x-www-form-urlencoded
+        Accept: */*
+
+        username=john_doe&password=john1234&next=/account
+      - |
+        GET /admin/reports/ HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: scanner
+        Accept: */*
+    cookie-reuse: true
+    redirects: true
+    max-redirects: 2
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "Operations Reports"
+          - "Recent Accounts"
+          - "admin@shopnest.com"
+        condition: and

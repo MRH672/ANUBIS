@@ -1,0 +1,29 @@
+id: shopnest-reflected-xss
+
+info:
+  name: ShopNest Reflected XSS
+  author: codex
+  severity: medium
+  description: Checks reflected input handling in the feedback topic preview.
+  tags: xss,reflected,shopnest
+
+http:
+  - raw:
+      - |
+        GET /feedback/?topic=%3Csvg%20onload%3D%22void%28%27SHOPNEST_REFLECTED_XSS_13579%27%29%22%3E HTTP/1.1
+        Host: {{Hostname}}
+        User-Agent: scanner
+        Accept: */*
+    redirects: true
+    max-redirects: 2
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+      - type: word
+        part: body
+        words:
+          - "Previewing topic:"
+          - "<svg onload=\"void('SHOPNEST_REFLECTED_XSS_13579')\">"
+        condition: and
