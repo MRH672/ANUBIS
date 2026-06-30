@@ -2601,7 +2601,7 @@ function ReportMetric({ label, value }) {
 function ModeToggle({ mode, bootComplete, setupActive, onChange }) {
   return (
     <div className="absolute left-7 top-[22px] z-[9999] flex rounded-full border border-anubis-violet/20 bg-[#120a23]/30 p-1 backdrop-blur">
-      {["voice", "chat", "reports", "settings"].map((item) => {
+      {["voice", "reports", "settings"].map((item) => {
         const active = mode === item;
         const locked =
           (!bootComplete && item === "reports") ||
